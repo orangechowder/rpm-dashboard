@@ -261,6 +261,7 @@ export default function Home() {
   const remoteJobsUpdate = useRef(false);
   const remoteUnitsUpdate = useRef(false);
   const cloudPollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const cloudRefreshInFlight = useRef(false);
   const t = (key: string) => translations[language][key] ?? key;
   const accounts = ["Andrée-Anne", "Marc", "Dannick"];
   const signIn = (event: React.FormEvent<HTMLFormElement>) => {
@@ -341,28 +342,30 @@ export default function Home() {
       });
     };
     const refreshFromCloud = () => {
+      if (cloudRefreshInFlight.current) return;
+      cloudRefreshInFlight.current = true;
       void loadFleetData().then((data) => {
         if (!data) return;
         remoteJobsUpdate.current = true;
         remoteUnitsUpdate.current = true;
         setJobData(data.jobs as Job[]);
         setUnitData(data.units as Unit[]);
-      }).catch((error: Error) => setCloudError(`Cloud polling error: ${error.message}`));
+        setCloudError(null);
+      }).catch((error: Error) => setCloudError(`Cloud sync retrying: ${error.message}`)).finally(() => {
+        cloudRefreshInFlight.current = false;
+      });
     };
+    refreshFromCloud();
+    cloudPollTimer.current = setInterval(refreshFromCloud, 2500);
     const unsubscribe = subscribeToFleet(applyUnitChange, applyJobChange, (message) => {
-      setCloudError("Realtime transport unavailable; cloud polling fallback is active.");
-      if (!cloudPollTimer.current) {
-        refreshFromCloud();
-        cloudPollTimer.current = setInterval(refreshFromCloud, 2500);
-      }
+      setCloudError("Realtime transport unavailable; cloud polling is active.");
+      refreshFromCloud();
       console.warn("Supabase realtime transport:", message);
     });
     return () => {
       unsubscribe();
-      if (cloudPollTimer.current) {
-        clearInterval(cloudPollTimer.current);
-        cloudPollTimer.current = null;
-      }
+      if (cloudPollTimer.current) clearInterval(cloudPollTimer.current);
+      cloudPollTimer.current = null;
     };
   }, [cloudReady]);
   useEffect(() => {
