@@ -115,6 +115,28 @@ export async function createManualTimeEntry(entry: { userId: string; userName: s
   return mapTimeEntry(data as Record<string, unknown>);
 }
 
+export async function updateTimeEntry(entry: CloudTimeEntry) {
+  if (!supabase) return;
+  const { error } = await supabase.from("time_entries").update({
+    user_id: entry.userId,
+    user_name: entry.userName,
+    work_order_id: entry.workOrderId,
+    clock_in: entry.clockIn,
+    clock_out: entry.clockOut,
+    total_hours: entry.totalHours,
+    status: entry.status,
+  }).eq("id", entry.id);
+  if (error?.code === "PGRST205") throw new Error("The time_entries table is not installed. Run supabase/schema.sql first.");
+  if (error) throw error;
+}
+
+export async function removeTimeEntry(id: string) {
+  if (!supabase) return;
+  const { error } = await supabase.from("time_entries").delete().eq("id", id);
+  if (error?.code === "PGRST205") throw new Error("The time_entries table is not installed. Run supabase/schema.sql first.");
+  if (error) throw error;
+}
+
 export async function removeUnit(unit: string) {
   if (!supabase) return;
   const { error } = await supabase.from("fleet_units").delete().eq("unit", unit);

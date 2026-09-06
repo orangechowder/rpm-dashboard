@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Image from "next/image";
-import { completeTimeEntry, createManualTimeEntry, createTimeEntry, hasSupabaseConfig, loadFleetData, loadTimeEntries, loadUsers, removeJob, removeUnit, saveJobs, saveUnits, saveUsers, subscribeToFleet, writeActivityLog, type RealtimeChange, type CloudJob, type CloudTimeEntry, type CloudUnit, type CloudUser } from "../lib/fleet-repository";
+import { completeTimeEntry, createManualTimeEntry, createTimeEntry, hasSupabaseConfig, loadFleetData, loadTimeEntries, loadUsers, removeJob, removeTimeEntry, removeUnit, saveJobs, saveUnits, saveUsers, subscribeToFleet, updateTimeEntry, writeActivityLog, type RealtimeChange, type CloudJob, type CloudTimeEntry, type CloudUnit, type CloudUser } from "../lib/fleet-repository";
 
 type Section = "overview" | "jobs" | "units" | "users" | "clients" | "punch";
 type Language = "en" | "fr";
@@ -168,28 +168,40 @@ const defaultUsers: UserAccount[] = [
 
 const translations: Record<Language, Record<string, string>> = {
   en: {
-    dashboardOverview: "Dashboard Overview", activeJobQueue: "Active Job Queue", unitManagement: "Unit Management", clientManagement: "Client Management", punchClock: "Punch Clock", punchSubtitle: "Track your working time and connect it to a work order.", userManagement: "User Management", usersSubtitle: "Manage dashboard access, roles, and active profiles.", clientsSubtitle: "Browse and manage every fleet client.", workspace: "WORKSPACE", partsOnly: "Parts only", total: "Total", amountPerItem: "$ / item", section: "Section", chooseSection: "Choose section", entries: "entries", items: "items", clients: "clients", history: "History", edit: "Edit", save: "Save", searchClients: "Search clients...", newClientName: "New client name", addClient: "Add client", fleetClient: "Fleet client", allFleetRecords: "All fleet records up to date", unitsOverduePm: "Units overdue for PM", requiresAttention: "Requires immediate attention", assignedClientLabel: "ASSIGNED CLIENT", lastServiceLabel: "LAST SERVICE", lastUsageLabel: "LAST SERVICE USAGE", describeIssue: "Describe the issue", usageExample: "e.g. 184220 KM or 4280 Hrs", unitExample: "e.g. TRK-506", vinExample: "17-character VIN", typeExample: "e.g. Volvo VNL", cloudNotConfigured: "Cloud sync is not configured. Add your Supabase environment variables to .env.local.", exportReady: "Work orders exported", serviceHistory: "SERVICE HISTORY", completedWorkOrders: "Completed work orders", cloudTimeMissing: "Punch Clock is not installed in Supabase yet. Run the database schema first.", fleetRecordsDetail: "Fleet inventory",
+    dashboardOverview: "Dashboard Overview", activeJobQueue: "Active Job Queue", unitManagement: "Unit Management", clientManagement: "Client Management", punchClock: "Punch Clock", punchSubtitle: "Track your working time and connect it to a work order.", userManagement: "User Management", usersSubtitle: "Manage dashboard access, roles, and active profiles.", clientsSubtitle: "Browse and manage every fleet client.", workspace: "WORKSPACE", partsOnly: "Parts only", total: "Total", amountPerItem: "$ / item", section: "Section", chooseSection: "Choose section", entries: "entries", items: "items", clients: "clients", history: "History", edit: "Edit", save: "Save", searchClients: "Search clients...", newClientName: "New client name", addClient: "Add client", fleetClient: "Fleet client", allFleetRecords: "All fleet records up to date", unitsOverduePm: "Units overdue for PM", requiresAttention: "Requires immediate attention", assignedClientLabel: "ASSIGNED CLIENT", lastServiceLabel: "LAST SERVICE", lastUsageLabel: "LAST SERVICE USAGE", describeIssue: "Describe the issue", usageExample: "e.g. 184220 KM or 4280 Hrs", unitExample: "e.g. TRK-506", vinExample: "17-character VIN", typeExample: "e.g. Volvo VNL", cloudNotConfigured: "Cloud sync is not configured. Add your Supabase environment variables to .env.local.", exportReady: "Work orders exported", serviceHistory: "SERVICE HISTORY", completedWorkOrders: "Completed work orders", cloudTimeMissing: "Punch Clock is not installed in Supabase yet. Run the database schema first.", fleetRecordsDetail: "Fleet inventory", week: "Week", month: "Month", today: "Today", noPunchesInPeriod: "No punches in this period.", periodStart: "Showing from", previousPeriod: "Previous period", nextPeriod: "Next period", chooseDate: "Choose date", currentPeriod: "Current period",
     goodMorning: "Good morning", overviewSubtitle: "Here's what's happening across your fleet today.", jobsSubtitle: "Monitor and coordinate every active service request.", unitsSubtitle: "Keep your fleet records current and service-ready.", systemOperational: "System operational", lastSynced: "Last synced just now", emergency: "Emergency", reviewUnits: "Review units →",
     workOrders: "WORK ORDERS", activeJobs: "Active Jobs", totalInProgress: "Total in progress", waitingParts: "Waiting on parts", waitingEstimates: "Waiting on estimates", fleetHealth: "FLEET HEALTH", unitStatus: "Unit Status", totalUnits: "Total units repertoried", fleetRecords: "All fleet records up to date", pmCompliance: "PM compliance", overduePm: "units overdue for PM", fieldOperations: "FIELD OPERATIONS", fieldService: "Field Service", techsOnRoad: "Technicians on road", unassignedCalls: "Unassigned calls", responseTime: "Avg response time", recentActivity: "RECENT ACTIVITY", latestUpdates: "Latest updates", viewAll: "View all →", quickActions: "QUICK ACTIONS", quickQuestion: "What would you like to do?", createWorkOrder: "Create work order", startService: "Start a new service request", addUnit: "Add a unit", registerAsset: "Register a vehicle or asset", serviceOperations: "SERVICE OPERATIONS", workOrderQueue: "Work order queue", newWorkOrder: "+ New work order", export: "Export ↓", assetDatabase: "ASSET DATABASE", fleetDirectory: "Fleet directory", addNewUnit: "+ Add unit", filters: "Filters ≡", assignedClient: "ASSIGNED CLIENT", lastService: "LAST SERVICE", lastUsage: "LAST SERVICE USAGE", pmNeeded: "PM needed", pmClear: "PM clear", workOrder: "Work order", unitClient: "Unit / client", technician: "Technician", priority: "Priority", status: "Status", updated: "Updated", fleetUnit: "Fleet unit", selectUnit: "Select a unit from the repertory", addNewUnitOption: "+ Add New Unit to Repertory", serviceRequest: "Service request", lastServiceUsage: "Last service mileage / hours", unitNumber: "Unit number", vin: "VIN", clientName: "Client name", lastServiceDate: "Last service", unitType: "Unit type", saveUnit: "Save unit", cancel: "Cancel", deleteUnit: "Delete unit", close: "Close modal", workOrderDetails: "WORK ORDER", notes: "Technician notes", addNotePlaceholder: "Add a timestamped note...", addNote: "Add note", parts: "Parts", description: "Description", amount: "Amount", add: "Add", delete: "Delete", deleteWorkOrder: "Delete work order", done: "Done", createTitle: "Create work order", addUnitTitle: "Add fleet unit", editUnitTitle: "Edit fleet unit", addToRepertory: "Add unit to repertory", part: "Part", labor: "Labor", loginTitle: "RPM Diesel Dashboard", loginSubtitle: "Sign in to manage fleet operations", name: "Name", password: "Password", signIn: "Sign in", invalidLogin: "Enter a valid name and password.", signedInAs: "Signed in as", signOut: "Sign out", language: "Switch language",
     userDirectory: "USER DIRECTORY", manageProfiles: "Manage dashboard access and roles", addTechnician: "+ Add technician", role: "Role", active: "Active", disabled: "Disabled", admin: "Admin", removeUser: "Remove user", changePassword: "Change password", adminChangePassword: "Set password", currentPassword: "Current password", newPassword: "New password", confirmPassword: "Confirm new password", updatePassword: "Update password", technicianList: "Technician list", punchHistory: "Punch history", punchedBy: "Punched by", clockIn: "Clock in", clockOut: "Clock out", totalHours: "Total hours", totalWorked: "Total worked hours", activePunch: "Active", noPunches: "No punches recorded yet.", noData: "—", "In Progress": "In Progress", "Waiting on Parts": "Waiting on Parts", "Waiting on Estimates": "Waiting on Estimates", Completed: "Completed", High: "High", Normal: "Normal", Low: "Low",
   },
   fr: {
-    dashboardOverview: "Vue d'ensemble", activeJobQueue: "File des travaux actifs", unitManagement: "Gestion des unités", clientManagement: "Gestion des clients", punchClock: "Poinçonneuse", punchSubtitle: "Suivez votre temps de travail et associez-le à un ordre de travail.", userManagement: "Gestion des utilisateurs", usersSubtitle: "Gérez les accès, les rôles et les profils actifs.", clientsSubtitle: "Consultez et gérez tous les clients de la flotte.", workspace: "ESPACE DE TRAVAIL", partsOnly: "Pièces seulement", total: "Total", amountPerItem: "$ / pièce", section: "Section", chooseSection: "Choisir une section", entries: "entrées", items: "articles", clients: "clients", history: "Historique", edit: "Modifier", save: "Enregistrer", searchClients: "Rechercher des clients...", newClientName: "Nom du nouveau client", addClient: "Ajouter le client", fleetClient: "Client de flotte", allFleetRecords: "Tous les dossiers de flotte sont à jour", unitsOverduePm: "Unités en retard de PM", requiresAttention: "Attention immédiate requise", assignedClientLabel: "CLIENT ASSIGNÉ", lastServiceLabel: "DERNIER SERVICE", lastUsageLabel: "DERNIÈRE UTILISATION", describeIssue: "Décrire le problème", usageExample: "ex. 184220 KM ou 4280 Hrs", unitExample: "ex. TRK-506", vinExample: "NIV de 17 caractères", typeExample: "ex. Volvo VNL", cloudNotConfigured: "La synchronisation infonuagique n'est pas configurée. Ajoutez vos variables Supabase dans .env.local.", exportReady: "Ordres de travail exportés", serviceHistory: "HISTORIQUE DE SERVICE", completedWorkOrders: "Ordres de travail complétés", cloudTimeMissing: "La poinçonneuse n'est pas encore installée dans Supabase. Exécutez d'abord le schéma de base de données.", fleetRecordsDetail: "Inventaire de la flotte",
+    dashboardOverview: "Vue d'ensemble", activeJobQueue: "File des travaux actifs", unitManagement: "Gestion des unités", clientManagement: "Gestion des clients", punchClock: "Poinçonneuse", punchSubtitle: "Suivez votre temps de travail et associez-le à un ordre de travail.", userManagement: "Gestion des utilisateurs", usersSubtitle: "Gérez les accès, les rôles et les profils actifs.", clientsSubtitle: "Consultez et gérez tous les clients de la flotte.", workspace: "ESPACE DE TRAVAIL", partsOnly: "Pièces seulement", total: "Total", amountPerItem: "$ / pièce", section: "Section", chooseSection: "Choisir une section", entries: "entrées", items: "articles", clients: "clients", history: "Historique", edit: "Modifier", save: "Enregistrer", searchClients: "Rechercher des clients...", newClientName: "Nom du nouveau client", addClient: "Ajouter le client", fleetClient: "Client de flotte", allFleetRecords: "Tous les dossiers de flotte sont à jour", unitsOverduePm: "Unités en retard de PM", requiresAttention: "Attention immédiate requise", assignedClientLabel: "CLIENT ASSIGNÉ", lastServiceLabel: "DERNIER SERVICE", lastUsageLabel: "DERNIÈRE UTILISATION", describeIssue: "Décrire le problème", usageExample: "ex. 184220 KM ou 4280 Hrs", unitExample: "ex. TRK-506", vinExample: "NIV de 17 caractères", typeExample: "ex. Volvo VNL", cloudNotConfigured: "La synchronisation infonuagique n'est pas configurée. Ajoutez vos variables Supabase dans .env.local.", exportReady: "Ordres de travail exportés", serviceHistory: "HISTORIQUE DE SERVICE", completedWorkOrders: "Ordres de travail complétés", cloudTimeMissing: "La poinçonneuse n'est pas encore installée dans Supabase. Exécutez d'abord le schéma de base de données.", fleetRecordsDetail: "Inventaire de la flotte", week: "Semaine", month: "Mois", today: "Aujourd'hui", noPunchesInPeriod: "Aucun poinçon dans cette période.", periodStart: "Affichage à partir du", previousPeriod: "Période précédente", nextPeriod: "Période suivante", chooseDate: "Choisir une date", currentPeriod: "Période actuelle",
     goodMorning: "Bonjour", overviewSubtitle: "Voici ce qui se passe dans votre flotte aujourd'hui.", jobsSubtitle: "Surveillez et coordonnez chaque demande de service active.", unitsSubtitle: "Gardez les dossiers de votre flotte à jour et prête pour le service.", systemOperational: "Système opérationnel", lastSynced: "Synchronisé à l'instant", emergency: "Urgence", reviewUnits: "Réviser les unités →",
     workOrders: "ORDRES DE TRAVAIL", activeJobs: "Travaux actifs", totalInProgress: "Total en cours", waitingParts: "En attente de pièces", waitingEstimates: "En attente d'estimations", fleetHealth: "ÉTAT DE LA FLOTTE", unitStatus: "État des unités", totalUnits: "Total des unités répertoriées", fleetRecords: "Tous les dossiers sont à jour", pmCompliance: "Conformité PM", overduePm: "unités en retard de PM", fieldOperations: "OPÉRATIONS TERRAIN", fieldService: "Service sur le terrain", techsOnRoad: "Techniciens sur la route", unassignedCalls: "Appels non assignés", responseTime: "Temps de réponse moyen", recentActivity: "ACTIVITÉ RÉCENTE", latestUpdates: "Dernières mises à jour", viewAll: "Voir tout →", quickActions: "ACTIONS RAPIDES", quickQuestion: "Que voulez-vous faire?", createWorkOrder: "Créer un ordre de travail", startService: "Démarrer une demande de service", addUnit: "Ajouter une unité", registerAsset: "Enregistrer un véhicule ou un actif", serviceOperations: "OPÉRATIONS DE SERVICE", workOrderQueue: "File des ordres de travail", newWorkOrder: "+ Nouvel ordre de travail", export: "Exporter ↓", assetDatabase: "BASE DES ACTIFS", fleetDirectory: "Répertoire de la flotte", addNewUnit: "+ Ajouter une unité", filters: "Filtres ≡", assignedClient: "CLIENT ASSIGNÉ", lastService: "DERNIER SERVICE", lastUsage: "DERNIÈRE UTILISATION", pmNeeded: "PM requis", pmClear: "PM à jour", workOrder: "Ordre de travail", unitClient: "Unité / client", technician: "Technicien", priority: "Priorité", status: "Statut", updated: "Mis à jour", fleetUnit: "Unité de la flotte", selectUnit: "Sélectionner une unité du répertoire", addNewUnitOption: "+ Ajouter une unité au répertoire", serviceRequest: "Demande de service", lastServiceUsage: "Kilométrage / heures depuis le dernier service", unitNumber: "Numéro d'unité", vin: "NIV", clientName: "Nom du client", lastServiceDate: "Dernier service", unitType: "Type d'unité", saveUnit: "Enregistrer l'unité", cancel: "Annuler", deleteUnit: "Supprimer l'unité", close: "Fermer la fenêtre", workOrderDetails: "ORDRE DE TRAVAIL", notes: "Notes du technicien", addNotePlaceholder: "Ajouter une note horodatée...", addNote: "Ajouter la note", parts: "Pièces", description: "Description", amount: "Montant", add: "Ajouter", delete: "Supprimer", deleteWorkOrder: "Supprimer l'ordre de travail", done: "Terminé", createTitle: "Créer un ordre de travail", addUnitTitle: "Ajouter une unité", editUnitTitle: "Modifier l'unité", addToRepertory: "Ajouter au répertoire", part: "Pièce", labor: "Main-d'œuvre", loginTitle: "Tableau de bord RPM Diesel", loginSubtitle: "Connectez-vous pour gérer les opérations de flotte", name: "Nom", password: "Mot de passe", signIn: "Se connecter", invalidLogin: "Entrez un nom et un mot de passe valides.", signedInAs: "Session de", signOut: "Se déconnecter", language: "Changer de langue",
     userDirectory: "RÉPERTOIRE DES UTILISATEURS", manageProfiles: "Gérez les accès et les rôles du tableau de bord", addTechnician: "+ Ajouter un technicien", role: "Rôle", active: "Actif", disabled: "Désactivé", admin: "Administrateur", removeUser: "Supprimer l'utilisateur", changePassword: "Changer le mot de passe", adminChangePassword: "Définir le mot de passe", currentPassword: "Mot de passe actuel", newPassword: "Nouveau mot de passe", confirmPassword: "Confirmer le nouveau mot de passe", updatePassword: "Mettre à jour le mot de passe", technicianList: "Liste des techniciens", punchHistory: "Historique des poinçons", punchedBy: "Pointé par", clockIn: "Début", clockOut: "Fin", totalHours: "Heures totales", totalWorked: "Heures travaillées totales", activePunch: "Actif", noPunches: "Aucun poinçon enregistré.", noData: "—", "In Progress": "En cours", "Waiting on Parts": "En attente de pièces", "Waiting on Estimates": "En attente d'estimations", Completed: "Terminé", High: "Élevée", Normal: "Normale", Low: "Faible",
   },
 };
 
+`
 function loadStored<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
   try {
-    /*
-    dashboardOverview: "Dashboard Overview", activeJobQueue: "Active Job Queue", unitManagement: "Unit Management", clientManagement: "Client Management", punchClock: "Punch Clock", punchSubtitle: "Track your working time and connect it to a work order.", userManagement: "User Management", usersSubtitle: "Manage dashboard access, roles, and active profiles.", clientsSubtitle: "Browse and manage every fleet client.", workspace: "WORKSPACE", partsOnly: "Parts only", total: "Total",
+    //
+      previousPeriod: "Previous period", nextPeriod: "Next period", chooseDate: "Choose date", currentPeriod: "Current period", day: "Day",
     return stored ? (JSON.parse(stored) as T) : fallback;
     workOrders: "WORK ORDERS", activeJobs: "Active Jobs", totalInProgress: "Total in progress", waitingParts: "Waiting on parts", waitingEstimates: "Waiting on estimates", fleetHealth: "FLEET HEALTH", unitStatus: "Unit Status", totalUnits: "Total units repertoried", fleetRecords: "All fleet records up to date", pmCompliance: "PM compliance", overduePm: "units overdue for PM", fieldOperations: "FIELD OPERATIONS", fieldService: "Field Service", techsOnRoad: "Technicians on road", unassignedCalls: "Unassigned calls", responseTime: "Avg response time", recentActivity: "RECENT ACTIVITY", latestUpdates: "Latest updates", viewAll: "View all →", quickActions: "QUICK ACTIONS", quickQuestion: "What would you like to do?", createWorkOrder: "Create work order", startService: "Start a new service request", addUnit: "Add a unit", registerAsset: "Register a vehicle or asset", serviceOperations: "SERVICE OPERATIONS", workOrderQueue: "Work order queue", newWorkOrder: "+ New work order", export: "Export ↓", assetDatabase: "ASSET DATABASE", fleetDirectory: "Fleet directory", addNewUnit: "+ Add unit", filters: "Filters ≡", assignedClient: "ASSIGNED CLIENT", lastService: "LAST SERVICE", lastUsage: "LAST SERVICE USAGE", pmNeeded: "PM needed", pmClear: "PM clear", workOrder: "Work order", unitClient: "Unit / client", technician: "Technician", priority: "Priority", status: "Status", updated: "Updated", fleetUnit: "Fleet unit", selectUnit: "Select a unit from the repertory", addNewUnitOption: "+ Add New Unit to Repertory", serviceRequest: "Service request", lastServiceUsage: "Last service mileage / hours", unitNumber: "Unit number", vin: "VIN", clientName: "Client name", lastServiceDate: "Last service", unitType: "Unit type", saveUnit: "Save unit", cancel: "Cancel", deleteUnit: "Delete unit", close: "Close modal", workOrderDetails: "WORK ORDER", notes: "Technician notes", addNotePlaceholder: "Add a timestamped note...", addNote: "Add note", parts: "Labor & parts", description: "Description", amount: "Amount", add: "Add", delete: "Delete", deleteWorkOrder: "Delete work order", done: "Done", createTitle: "Create work order", addUnitTitle: "Add fleet unit", editUnitTitle: "Edit fleet unit", addToRepertory: "Add unit to repertory", part: "Part", labor: "Labor", loginTitle: "RPM Diesel Dashboard", loginSubtitle: "Sign in to manage fleet operations", name: "Name", password: "Password", signIn: "Sign in", invalidLogin: "Enter a valid name and password.", signedInAs: "Signed in as", signOut: "Sign out", language: "Switch language",
     return fallback;
-    */
+    //
+      previousPeriod: "Période précédente", nextPeriod: "Période suivante", chooseDate: "Choisir une date", currentPeriod: "Période actuelle", day: "Jour",
+    return stored ? (JSON.parse(stored) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+`;
+
+function loadStored<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  try {
     const stored = window.localStorage.getItem(key);
     return stored ? (JSON.parse(stored) as T) : fallback;
   } catch {
@@ -315,6 +327,26 @@ export default function Home() {
   const [manualTimeUser, setManualTimeUser] = useState("");
   const [manualTimeJob, setManualTimeJob] = useState("");
   const [manualTimeHours, setManualTimeHours] = useState("");
+  const [punchPeriod, setPunchPeriod] = useState<"day" | "week" | "month">("week");
+  const [punchAnchorDate, setPunchAnchorDate] = useState(() => new Date().toISOString().slice(0, 10));
+  useEffect(() => {
+    if (punchPeriod !== "day") return;
+    const handleDayNavigation = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const button = target.closest(".period-nav-button");
+      if (!(button instanceof HTMLButtonElement)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const next = new Date(`${punchAnchorDate}T12:00:00`);
+      next.setDate(next.getDate() + (button.textContent?.includes("‹") ? -1 : 1));
+      setPunchAnchorDate(next.toISOString().slice(0, 10));
+    };
+    document.addEventListener("click", handleDayNavigation, true);
+    return () => document.removeEventListener("click", handleDayNavigation, true);
+  }, [punchPeriod, punchAnchorDate]);
+  const [editingTimeEntryId, setEditingTimeEntryId] = useState<string | null>(null);
+  const [editingTimeEntry, setEditingTimeEntry] = useState<CloudTimeEntry | null>(null);
   const [unitData, setUnitData] = useState<Unit[]>(units);
   const [jobData, setJobData] = useState<Job[]>(jobs);
   const [timeEntries, setTimeEntries] = useState<CloudTimeEntry[]>([]);
@@ -325,7 +357,7 @@ export default function Home() {
   const remoteUsersUpdate = useRef(false);
   const cloudPollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const cloudRefreshInFlight = useRef(false);
-  const t = (key: string) => translations[language][key] ?? key;
+  const t = (key: string) => translations[language][key] ?? (key === "day" ? language === "en" ? "Day" : "Jour" : key);
   const todayLabel = new Intl.DateTimeFormat(language === "fr" ? "fr-CA" : "en-CA", { dateStyle: "medium" }).format(new Date());
   const formatCurrency = (amount: number) => new Intl.NumberFormat(language === "fr" ? "fr-CA" : "en-CA", {
     style: "currency",
@@ -400,6 +432,33 @@ export default function Home() {
       if (created) setTimeEntries((current) => [created, ...current]);
       setManualTimeHours("");
     } catch (error) { setCloudError(`Manual time entry failed: ${(error as Error).message}`); }
+  };
+  const startTimeEntryEdit = (entry: CloudTimeEntry) => {
+    setEditingTimeEntryId(entry.id);
+    setEditingTimeEntry({ ...entry });
+  };
+  const saveTimeEntryEdit = async () => {
+    if (!editingTimeEntry) return;
+    try {
+      await updateTimeEntry(editingTimeEntry);
+      setTimeEntries((current) => current.map((entry) => entry.id === editingTimeEntry.id ? editingTimeEntry : entry));
+      setEditingTimeEntryId(null);
+      setEditingTimeEntry(null);
+    } catch (error) {
+      setCloudError(`Time entry update failed: ${(error as Error).message}`);
+    }
+  };
+  const deleteTimeEntry = async (entryId: string) => {
+    try {
+      await removeTimeEntry(entryId);
+      setTimeEntries((current) => current.filter((entry) => entry.id !== entryId));
+      if (editingTimeEntryId === entryId) {
+        setEditingTimeEntryId(null);
+        setEditingTimeEntry(null);
+      }
+    } catch (error) {
+      setCloudError(`Time entry deletion failed: ${(error as Error).message}`);
+    }
   };
   const visibleNavItems = activeUser === "Marc" ? [...navItems, { id: "users" as Section, label: "userManagement", icon: "♙" }] : navItems;
   const canManageWorkOrders = activeUser === "Marc";
@@ -578,9 +637,13 @@ export default function Home() {
     window.addEventListener("storage", handleStorage);
     return () => window.removeEventListener("storage", handleStorage);
   }, []);
-  const filteredJobs = jobData.filter(
-    (job) => jobFilter === "All" || job.status === jobFilter,
-  );
+  const filteredJobs = jobFilter === "All"
+    ? jobData.filter((job) => job.status.trim() !== "Completed")
+    : jobData.filter((job) => job.status.trim() === jobFilter);
+  const openJobsQueue = () => {
+    setJobFilter("All");
+    setSection("jobs");
+  };
   const filteredUnits = useMemo(
     () =>
       unitData.filter((unit) =>
@@ -618,7 +681,34 @@ export default function Home() {
     : undefined;
   const workedHoursFor = (workOrderId: string) => timeEntries.filter((entry) => entry.workOrderId === workOrderId && entry.totalHours != null).reduce((total, entry) => total + (entry.totalHours ?? 0), 0).toFixed(2);
   const currentAccount = userAccounts.find((account) => account.name === activeUser);
-  const visibleTimeEntries = currentAccount?.role === "Admin" ? timeEntries : timeEntries.filter((entry) => entry.userId === activeUser);
+  const punchDayKey = (iso: string) => {
+    const date = new Date(iso);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  };
+  const periodStart = new Date(`${punchAnchorDate}T12:00:00`);
+  periodStart.setHours(0, 0, 0, 0);
+  if (punchPeriod === "week") {
+    const day = periodStart.getDay();
+    periodStart.setDate(periodStart.getDate() - (day === 0 ? 6 : day - 1));
+  } else if (punchPeriod === "month") {
+    periodStart.setDate(1);
+  }
+  const periodEnd = new Date(periodStart);
+  if (punchPeriod === "day") periodEnd.setDate(periodEnd.getDate() + 1);
+  else if (punchPeriod === "week") periodEnd.setDate(periodEnd.getDate() + 7);
+  else periodEnd.setMonth(periodEnd.getMonth() + 1);
+  const scopedTimeEntries = currentAccount?.role === "Admin" ? timeEntries : timeEntries.filter((entry) => entry.userId === activeUser);
+  const periodTimeEntries = scopedTimeEntries
+    .filter((entry) => {
+      const timestamp = new Date(entry.clockIn).getTime();
+      return timestamp >= periodStart.getTime() && timestamp < periodEnd.getTime();
+    })
+    .sort((left, right) => new Date(right.clockIn).getTime() - new Date(left.clockIn).getTime());
+  const visibleTimeEntries = periodTimeEntries;
+  const punchGroups = Array.from(new Set(periodTimeEntries.map((entry) => punchDayKey(entry.clockIn)))).map((dayKey) => ({
+    dayKey,
+    entries: periodTimeEntries.filter((entry) => punchDayKey(entry.clockIn) === dayKey),
+  }));
   const longPunchEntries = timeEntries.filter((entry) => entry.userId === activeUser && entry.workOrderId && entry.totalHours != null && entry.totalHours >= 7);
   const syncUnitFromJob = (
     job: Job,
@@ -1031,7 +1121,7 @@ export default function Home() {
                       <b>{openTechnicianJobs} {workloadAlert.assigned.replace("job(s)", openTechnicianJobs === 1 ? "job" : "jobs").replace("travail(aux)", openTechnicianJobs === 1 ? "travail" : "travaux")}</b>
                       <span>{workloadAlert.continue}</span>
                     </div>
-                    <button onClick={() => setSection("jobs")}>{workloadAlert.view}</button>
+                    <button onClick={openJobsQueue}>{workloadAlert.view}</button>
                   </div>
                 ) : null;
               })()}
@@ -1058,7 +1148,7 @@ export default function Home() {
                             <p className="card-kicker">{t("workOrders")}</p>
                               <h2>{t("activeJobs")}</h2>
                     </div>
-                    <button className="more-button" onClick={() => setSection("jobs")} aria-label={t("activeJobQueue")}>•••</button>
+                    <button className="more-button" onClick={openJobsQueue} aria-label={t("activeJobQueue")}>•••</button>
                   </div>
                   <MetricCard
                     label={t("totalInProgress")}
@@ -1119,7 +1209,7 @@ export default function Home() {
                             <p className="card-kicker">{t("fieldOperations")}</p>
                               <h2>{t("fieldService")}</h2>
                     </div>
-                    <button className="more-button" onClick={() => setSection("jobs")} aria-label={t("activeJobQueue")}>•••</button>
+                    <button className="more-button" onClick={openJobsQueue} aria-label={t("activeJobQueue")}>•••</button>
                   </div>
                   <MetricCard
                     label={t("techsOnRoad")}
@@ -1151,7 +1241,7 @@ export default function Home() {
                     </div>
                     <button
                       className="text-button"
-                      onClick={() => setSection("jobs")}
+                      onClick={openJobsQueue}
                     >
                       {t("viewAll")}
                     </button>
@@ -1175,7 +1265,7 @@ export default function Home() {
                   <p className="card-kicker">{t("quickActions")}</p>
                   <h2>{t("quickQuestion")}</h2>
                   <button
-                    onClick={() => setSection("jobs")}
+                    onClick={openJobsQueue}
                     className="quick-action"
                   >
                     <i>+</i>
@@ -1207,8 +1297,10 @@ export default function Home() {
               <PunchClock activeEntry={activeTimeEntry} jobs={jobData} language={language} onClockIn={clockIn} onClockOut={clockOut} />
               {canManageWorkOrders && <div className="manual-time-card"><div className="detail-section-heading"><h3>{language === "en" ? "Add technician time manually" : "Ajouter du temps technicien manuellement"}</h3></div><div className="manual-time-form"><select value={manualTimeUser} onChange={(event) => setManualTimeUser(event.target.value)} aria-label={t("technician")}><option value="">{language === "en" ? "Select technician" : "Sélectionner un technicien"}</option>{userAccounts.filter((account) => account.active && account.isTechnician).map((account) => <option key={account.id} value={account.name}>{account.name}</option>)}</select><select value={manualTimeJob} onChange={(event) => setManualTimeJob(event.target.value)} aria-label={t("workOrder")}><option value="">{language === "en" ? "No work order" : "Aucun ordre"}</option>{jobData.filter((job) => job.status !== "Completed").map((job) => <option key={job.id} value={job.id}>{job.unit} · {job.issue}</option>)}</select><input type="number" min="0.01" step="0.01" value={manualTimeHours} onChange={(event) => setManualTimeHours(event.target.value)} placeholder={language === "en" ? "Hours (decimal)" : "Heures (décimal)"} aria-label={language === "en" ? "Hours" : "Heures"} /><button className="primary-button" onClick={addManualTime}>{language === "en" ? "Add time" : "Ajouter le temps"}</button></div></div>}
               <div className="punch-history-section">
-                <div className="detail-section-heading"><h3>{t("punchHistory")}</h3><span>{timeEntries.length} {t("entries")}</span></div>
-                <div className="table-wrap"><table className="punch-history-table"><thead><tr><th>{t("punchedBy")}</th><th>{t("workOrder")}</th><th>{t("clockIn")}</th><th>{t("clockOut")}</th><th>{t("totalHours")}</th><th>{t("status")}</th></tr></thead><tbody>{visibleTimeEntries.length ? visibleTimeEntries.map((entry) => <tr key={entry.id}><td><strong>{entry.userName}</strong></td><td>{entry.workOrderId ? (jobData.find((job) => job.id === entry.workOrderId)?.unit ?? entry.workOrderId) : t("noData")}</td><td>{new Date(entry.clockIn).toLocaleString()}</td><td>{entry.clockOut ? new Date(entry.clockOut).toLocaleString() : t("activePunch")}</td><td>{entry.totalHours == null ? t("activePunch") : `${entry.totalHours.toFixed(2)} h`}</td><td><span className={`time-status ${entry.status === "active" ? "time-active" : "time-completed"}`}>{entry.status === "active" ? t("activePunch") : t("Completed")}</span></td></tr>) : <tr><td colSpan={6} className="empty-history">{t("noPunches")}</td></tr>}</tbody></table></div>
+                <select className="punch-period-select punch-period-select-all" value={punchPeriod} onChange={(event) => setPunchPeriod(event.target.value as "day" | "week" | "month")} aria-label={t("punchHistory")}><option value="day">{t("day")}</option><option value="week">{t("week")}</option><option value="month">{t("month")}</option></select>
+                <div className="detail-section-heading punch-history-heading"><div><h3>{t("punchHistory")}</h3><span>{periodTimeEntries.length} {t("entries")} · {periodStart.toLocaleDateString(language === "fr" ? "fr-CA" : "en-CA")} - {new Date(periodEnd.getTime() - 86400000).toLocaleDateString(language === "fr" ? "fr-CA" : "en-CA")}</span></div><div className="punch-period-controls"><button type="button" className="period-nav-button" onClick={() => { const next = new Date(`${punchAnchorDate}T12:00:00`); if (punchPeriod === "week") next.setDate(next.getDate() - 7); else next.setMonth(next.getMonth() - 1); setPunchAnchorDate(next.toISOString().slice(0, 10)); }} aria-label={t("previousPeriod")}>‹</button><input className="punch-date-picker" type="date" value={punchAnchorDate} onChange={(event) => setPunchAnchorDate(event.target.value)} aria-label={t("chooseDate")} /><button type="button" className="period-nav-button" onClick={() => { const next = new Date(`${punchAnchorDate}T12:00:00`); if (punchPeriod === "week") next.setDate(next.getDate() + 7); else next.setMonth(next.getMonth() + 1); setPunchAnchorDate(next.toISOString().slice(0, 10)); }} aria-label={t("nextPeriod")}>›</button><select className="punch-period-select" value={punchPeriod} onChange={(event) => setPunchPeriod(event.target.value as "week" | "month")} aria-label={t("punchHistory")}><option value="week">{t("week")}</option><option value="month">{t("month")}</option></select><button type="button" className="period-today-button" onClick={() => setPunchAnchorDate(new Date().toISOString().slice(0, 10))}>{t("currentPeriod")}</button></div></div>
+                <div className="punch-day-groups">{punchGroups.map((group) => <div className={`punch-day-group ${group.dayKey === punchDayKey(new Date().toISOString()) ? "punch-day-current" : ""}`} key={group.dayKey}><strong>{group.dayKey === punchDayKey(new Date().toISOString()) ? `${t("today")} · ` : ""}{new Date(`${group.dayKey}T00:00:00`).toLocaleDateString(language === "fr" ? "fr-CA" : "en-CA", { weekday: "long", month: "long", day: "numeric" })}</strong><span>{group.entries.length} {t("entries")}</span></div>)}</div>
+                <div className="table-wrap"><table className="punch-history-table"><thead><tr><th>{t("punchedBy")}</th><th>{t("workOrder")}</th><th>{t("clockIn")}</th><th>{t("clockOut")}</th><th>{t("totalHours")}</th><th>{t("status")}</th>{canManageWorkOrders && <th />}</tr></thead><tbody>{visibleTimeEntries.length ? visibleTimeEntries.map((entry) => editingTimeEntryId === entry.id && editingTimeEntry ? <tr key={entry.id} className="time-entry-edit-row"><td><select value={editingTimeEntry.userName} onChange={(event) => setEditingTimeEntry({ ...editingTimeEntry, userId: event.target.value, userName: event.target.value })}>{userAccounts.filter((account) => account.active && account.isTechnician).map((account) => <option key={account.id} value={account.name}>{account.name}</option>)}</select></td><td><select value={editingTimeEntry.workOrderId ?? ""} onChange={(event) => setEditingTimeEntry({ ...editingTimeEntry, workOrderId: event.target.value || null })}><option value="">{t("noData")}</option>{jobData.map((job) => <option key={job.id} value={job.id}>{job.unit} · {job.issue}</option>)}</select></td><td><input type="datetime-local" value={editingTimeEntry.clockIn.slice(0, 16)} onChange={(event) => setEditingTimeEntry({ ...editingTimeEntry, clockIn: new Date(event.target.value).toISOString() })} /></td><td><input type="datetime-local" value={editingTimeEntry.clockOut ? editingTimeEntry.clockOut.slice(0, 16) : ""} onChange={(event) => setEditingTimeEntry({ ...editingTimeEntry, clockOut: event.target.value ? new Date(event.target.value).toISOString() : null, status: event.target.value ? "completed" : "active" })} /></td><td><input type="number" min="0" step="0.01" value={editingTimeEntry.totalHours ?? ""} onChange={(event) => setEditingTimeEntry({ ...editingTimeEntry, totalHours: event.target.value ? Number(event.target.value) : null })} /></td><td><span className={`time-status ${editingTimeEntry.status === "active" ? "time-active" : "time-completed"}`}>{editingTimeEntry.status === "active" ? t("activePunch") : t("Completed")}</span></td><td><div className="time-entry-actions"><button className="primary-button" onClick={saveTimeEntryEdit}>{t("save")}</button><button className="entry-delete" onClick={() => deleteTimeEntry(entry.id)}>{t("delete")}</button></div></td></tr> : <tr key={entry.id}><td><strong>{entry.userName}</strong></td><td>{entry.workOrderId ? (jobData.find((job) => job.id === entry.workOrderId)?.unit ?? entry.workOrderId) : t("noData")}</td><td>{new Date(entry.clockIn).toLocaleString()}</td><td>{entry.clockOut ? new Date(entry.clockOut).toLocaleString() : t("activePunch")}</td><td>{entry.totalHours == null ? t("activePunch") : `${entry.totalHours.toFixed(2)} h`}</td><td><span className={`time-status ${entry.status === "active" ? "time-active" : "time-completed"}`}>{entry.status === "active" ? t("activePunch") : t("Completed")}</span></td>{canManageWorkOrders && <td><div className="time-entry-actions"><button className="outline-button" onClick={() => startTimeEntryEdit(entry)}>{t("edit")}</button><button className="entry-delete" onClick={() => deleteTimeEntry(entry.id)}>{t("delete")}</button></div></td>}</tr>) : <tr><td colSpan={canManageWorkOrders ? 7 : 6} className="empty-history">{t("noPunches")}</td></tr>}</tbody></table></div>
               </div>
             </section>
           )}
@@ -1293,7 +1385,7 @@ export default function Home() {
                       {filter === "All" ? (language === "en" ? "All" : "Tous") : t(filter)}
                       <span>
                         {filter === "All"
-                          ? jobData.length
+                          ? jobData.filter((job) => job.status.trim() !== "Completed").length
                           : jobData.filter((job) => job.status === filter)
                               .length}
                       </span>

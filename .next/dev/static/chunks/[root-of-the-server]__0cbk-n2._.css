@@ -464,6 +464,59 @@
   --red: #dc2626;
 }
 
+.punch-history-section {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  display: grid !important;
+}
+
+.punch-history-section .punch-period-select-all {
+  z-index: 5;
+  pointer-events: auto;
+  grid-area: 2 / 2;
+  align-self: start;
+  width: 108px;
+  min-width: 108px;
+  height: 32px;
+  margin: 0;
+  position: static !important;
+}
+
+.punch-history-section .punch-history-heading {
+  pointer-events: auto !important;
+  padding: 0 !important;
+  display: contents !important;
+}
+
+.punch-history-section .punch-history-heading > div:first-child {
+  grid-area: 1 / 1 / auto / -1;
+  min-width: 0;
+}
+
+.punch-history-section .punch-period-controls {
+  pointer-events: auto;
+  grid-area: 2 / 1;
+  justify-content: flex-start;
+  min-width: 0;
+  padding-right: 8px;
+}
+
+.punch-history-section .punch-day-groups, .punch-history-section .table-wrap {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 700px) {
+  .punch-history-section .punch-period-select-all {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .punch-history-section .punch-period-controls {
+    flex-wrap: wrap;
+    padding-right: 8px;
+  }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -1021,30 +1074,6 @@ button {
   background: #dc2626;
 }
 
-.emergency-button .punch-clock {
-  z-index: 25;
-  justify-content: space-between;
-  padding: 8px 10px;
-  position: fixed;
-  bottom: 12px;
-  left: 12px;
-  right: 12px;
-  box-shadow: 0 8px 24px #17203324;
-}
-
-.emergency-button .punch-clock select {
-  flex: 1;
-  max-width: none;
-}
-
-.emergency-button .punch-copy {
-  min-width: 76px;
-}
-
-.emergency-button .punch-button {
-  height: 32px;
-}
-
 .emergency-button {
   background: var(--red);
   color: #fff;
@@ -1178,6 +1207,7 @@ button {
   border-top: 1px solid #edf0f4;
   margin-top: 32px;
   padding-top: 20px;
+  position: relative;
 }
 
 .punch-history-table {
@@ -1230,6 +1260,158 @@ button {
   height: 36px;
   padding: 0 9px;
   font-size: 11px;
+}
+
+.time-entry-edit-row input, .time-entry-edit-row select {
+  border: 1px solid var(--line);
+  color: #344055;
+  background: #fff;
+  border-radius: 4px;
+  min-width: 110px;
+  height: 30px;
+  padding: 0 6px;
+  font-size: 10px;
+}
+
+.time-entry-actions {
+  white-space: nowrap;
+  align-items: center;
+  gap: 7px;
+  display: flex;
+}
+
+.time-entry-actions .primary-button, .time-entry-actions .outline-button {
+  padding: 7px 9px;
+  font-size: 10px;
+}
+
+.punch-period-select-all {
+  min-width: 108px;
+  margin: 0;
+  position: absolute;
+  top: 0;
+  right: 0;
+}
+
+.punch-history-heading {
+  padding-right: 120px;
+}
+
+.punch-period-controls .punch-period-select {
+  display: none !important;
+}
+
+.punch-history-heading {
+  gap: 12px;
+}
+
+.punch-history-heading > div {
+  min-width: 0;
+}
+
+.punch-history-heading span {
+  margin-top: 4px;
+  display: block;
+}
+
+.punch-period-controls {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 5px;
+  display: flex;
+}
+
+.punch-period-select, .punch-date-picker {
+  border: 1px solid var(--line);
+  color: #344055;
+  background: #fff;
+  border-radius: 5px;
+  width: auto;
+  min-width: 100px;
+  height: 32px;
+  padding: 0 8px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.punch-date-picker {
+  min-width: 132px;
+}
+
+.period-nav-button, .period-today-button {
+  border: 1px solid var(--line);
+  color: #344055;
+  background: #fff;
+  border-radius: 5px;
+  height: 32px;
+  padding: 0 9px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.period-today-button {
+  font-size: 10px;
+}
+
+.punch-day-groups {
+  gap: 6px;
+  margin-bottom: 10px;
+  display: grid;
+}
+
+.punch-day-group {
+  color: #344055;
+  text-transform: capitalize;
+  background: #f5f8fc;
+  border-left: 3px solid #3780db;
+  border-radius: 4px;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  font-size: 10px;
+  display: flex;
+}
+
+.punch-day-group span {
+  color: #98a1b2;
+}
+
+.punch-day-current {
+  background: #eefaf3;
+  border-left-color: #2b9862;
+}
+
+@media (min-width: 701px) {
+  .punch-history-section {
+    grid-template-columns: minmax(0, 1fr) auto;
+    display: grid;
+  }
+
+  .punch-history-section .punch-period-select-all {
+    z-index: 5;
+    pointer-events: auto;
+    grid-area: 1 / 2;
+    align-self: start;
+    height: 32px;
+    margin-top: 0;
+    position: static;
+  }
+
+  .punch-history-section .punch-history-heading {
+    pointer-events: none;
+    grid-area: 1 / 1 / auto / -1;
+    min-height: 32px;
+    padding-right: 120px;
+  }
+
+  .punch-history-section .punch-history-heading > div, .punch-history-section .punch-period-controls {
+    pointer-events: auto;
+  }
+
+  .punch-history-section .punch-day-groups, .punch-history-section .table-wrap {
+    grid-column: 1 / -1;
+  }
 }
 
 .work-order-time-list {
@@ -1547,7 +1729,9 @@ button {
   place-items: center;
   width: 31px;
   height: 31px;
+  font-size: 16px;
   font-weight: 800;
+  line-height: 1;
   display: grid;
 }
 
@@ -2844,6 +3028,89 @@ td small {
 
   .main-content .full-card .table-wrap {
     display: none;
+  }
+
+  .main-content .full-card.punch-page-card .table-wrap {
+    display: block;
+    overflow-x: auto;
+  }
+
+  .main-content .full-card.punch-page-card .punch-history-table {
+    min-width: 680px;
+  }
+
+  .punch-page-card .punch-clock {
+    flex-wrap: wrap;
+    justify-content: stretch;
+    width: 100%;
+    min-width: 0;
+    padding: 10px;
+    position: relative;
+    bottom: auto;
+    left: auto;
+    right: auto;
+  }
+
+  .punch-page-card .punch-copy {
+    flex: calc(100% - 24px);
+    min-width: 0;
+  }
+
+  .punch-page-card .punch-clock select {
+    flex: 100%;
+    max-width: none;
+    height: 38px;
+  }
+
+  .punch-page-card .punch-button {
+    flex: 100%;
+    height: 38px;
+  }
+
+  .manual-time-card {
+    padding: 12px;
+  }
+
+  .manual-time-form {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .manual-time-form select, .manual-time-form input, .manual-time-form button {
+    width: 100%;
+    min-width: 0;
+    height: 38px;
+  }
+
+  .punch-history-heading {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .punch-period-select-all {
+    float: none;
+    width: 100%;
+    margin: 0 0 8px;
+    position: static;
+  }
+
+  .punch-period-controls {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .punch-date-picker {
+    flex: 130px;
+    min-width: 0;
+  }
+
+  .punch-period-select {
+    flex: 90px;
+    min-width: 0;
+  }
+
+  .period-today-button {
+    flex: auto;
   }
 
   .mobile-job-list {
