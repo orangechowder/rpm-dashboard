@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Image from "next/image";
-import { hasSupabaseConfig, loadFleetData, removeJob, removeUnit, saveJobs, saveUnits, subscribeToFleet, writeActivityLog, type RealtimeChange, type CloudJob, type CloudUnit } from "../lib/fleet-repository";
+import { completeTimeEntry, createManualTimeEntry, createTimeEntry, hasSupabaseConfig, loadFleetData, loadTimeEntries, loadUsers, removeJob, removeUnit, saveJobs, saveUnits, saveUsers, subscribeToFleet, writeActivityLog, type RealtimeChange, type CloudJob, type CloudTimeEntry, type CloudUnit, type CloudUser } from "../lib/fleet-repository";
 
-type Section = "overview" | "jobs" | "units";
+type Section = "overview" | "jobs" | "units" | "users" | "clients" | "punch";
 type Language = "en" | "fr";
+type UserAccount = { id: string; name: string; role: "Admin" | "Technician"; password: string; active: boolean; isTechnician: boolean };
 type JobStatus =
   "In Progress" | "Waiting on Parts" | "Waiting on Estimates" | "Completed";
 type Note = { id: string; text: string; author: string; createdAt: string };
@@ -152,21 +153,31 @@ const units: Unit[] = [
 const navItems: { id: Section; label: string; icon: string }[] = [
   { id: "overview", label: "dashboardOverview", icon: "▦" },
   { id: "jobs", label: "activeJobQueue", icon: "≡" },
+  { id: "punch", label: "punchClock", icon: "◷" },
   { id: "units", label: "unitManagement", icon: "▣" },
+  { id: "clients", label: "clientManagement", icon: "◇" },
+];
+const defaultClients = [
+  "9056-8288 QC INC", "9173-9417 QC INC", "92186758 QC INC", "9418-8877 QC INC", "9567-0006 Québec inc.", "Acier Jean-Guy Robert", "Albert Fortier", "Annypier Maltais", "Aventura Construction", "Bilodeau Transport", "Bistro Tôt ou Tard", "Bruce Hodgins excavation", "Bryan Desloge", "Calmont Leasing", "Carolyne Lepage", "Cgm Boily Transport", "Clean water works", "Construction GFL Inc", "Crescent Moving and Storage", "Danny Jean", "Denis Houde", "Docteur Pavé", "Entretiens Prime Cuts", "Enviroimpact", "Expoland Exibition", "Fastco Canada", "Fritolay", "George", "Gestion TBL inc", "GFL ENVIRONMENT", "Groupe FP Excavation", "Groupe TruStone Inc", "Habitation Nieka INC", "Inox Milton", "International Equestrian Academy", "Jacques", "Js margins", "Justin", "Justin Courtemanche", "Lauren Moyer", "Les entreprises 3gd inc", "Les entreprises JF", "Les Jardins Lamoureux Gardens", "Les transports à nos trois inc.", "Lm.landry", "Mancini Construction", "Mario Cote INC", "Mon P’tit Rozon", "Normand Masson", "Northern Mat & Bridge", "Pavage Bolduc Inc.", "Pavage Milan", "Pavé Morissette Inc.", "Piscines Boisseau", "Pro-BJ Construction", "Purolator", "Real Bombardier", "Richard Phaneuf", "Shawn Chapman", "Solarium Solutions Rénovations", "Stephane Aston", "Terra solution", "TRANSPORT ANT-PASS LTEE", "Transport Bourassa", "Transport LGR", "Transport Martin Lefebvre", "Transport métropolitain Roy", "Transport OSI", "Transport Somavrac Inc", "Transport Sylvester Et Forget", "Transport TFI / Transport JCG", "Transports Roger léger", "Vert le Futur", "Ville de L'Île-Perrot", "VOLOD Transport INC", "Volvo Action Service", "WBM TRANSPORT", "Xavier Trépanier St-Onge", "Élagage O Max INC", "Élodie Lapensée",
+];
+const defaultUsers: UserAccount[] = [
+  { id: "user-andree-anne", name: "Andrée-Anne", role: "Technician", password: "12345678", active: true, isTechnician: true },
+  { id: "user-marc", name: "Marc", role: "Admin", password: "12345678", active: true, isTechnician: true },
+  { id: "user-dannick", name: "Dannick", role: "Technician", password: "12345678", active: true, isTechnician: true },
 ];
 
 const translations: Record<Language, Record<string, string>> = {
   en: {
-    dashboardOverview: "Dashboard Overview", activeJobQueue: "Active Job Queue", unitManagement: "Unit Management", workspace: "WORKSPACE",
+    dashboardOverview: "Dashboard Overview", activeJobQueue: "Active Job Queue", unitManagement: "Unit Management", clientManagement: "Client Management", punchClock: "Punch Clock", punchSubtitle: "Track your working time and connect it to a work order.", userManagement: "User Management", usersSubtitle: "Manage dashboard access, roles, and active profiles.", clientsSubtitle: "Browse and manage every fleet client.", workspace: "WORKSPACE",
     goodMorning: "Good morning", overviewSubtitle: "Here's what's happening across your fleet today.", jobsSubtitle: "Monitor and coordinate every active service request.", unitsSubtitle: "Keep your fleet records current and service-ready.", systemOperational: "System operational", lastSynced: "Last synced just now", emergency: "Emergency", reviewUnits: "Review units →",
     workOrders: "WORK ORDERS", activeJobs: "Active Jobs", totalInProgress: "Total in progress", waitingParts: "Waiting on parts", waitingEstimates: "Waiting on estimates", fleetHealth: "FLEET HEALTH", unitStatus: "Unit Status", totalUnits: "Total units repertoried", fleetRecords: "All fleet records up to date", pmCompliance: "PM compliance", overduePm: "units overdue for PM", fieldOperations: "FIELD OPERATIONS", fieldService: "Field Service", techsOnRoad: "Technicians on road", unassignedCalls: "Unassigned calls", responseTime: "Avg response time", recentActivity: "RECENT ACTIVITY", latestUpdates: "Latest updates", viewAll: "View all →", quickActions: "QUICK ACTIONS", quickQuestion: "What would you like to do?", createWorkOrder: "Create work order", startService: "Start a new service request", addUnit: "Add a unit", registerAsset: "Register a vehicle or asset", serviceOperations: "SERVICE OPERATIONS", workOrderQueue: "Work order queue", newWorkOrder: "+ New work order", export: "Export ↓", assetDatabase: "ASSET DATABASE", fleetDirectory: "Fleet directory", addNewUnit: "+ Add unit", filters: "Filters ≡", assignedClient: "ASSIGNED CLIENT", lastService: "LAST SERVICE", lastUsage: "LAST SERVICE USAGE", pmNeeded: "PM needed", pmClear: "PM clear", workOrder: "Work order", unitClient: "Unit / client", technician: "Technician", priority: "Priority", status: "Status", updated: "Updated", fleetUnit: "Fleet unit", selectUnit: "Select a unit from the repertory", addNewUnitOption: "+ Add New Unit to Repertory", serviceRequest: "Service request", lastServiceUsage: "Last service mileage / hours", unitNumber: "Unit number", vin: "VIN", clientName: "Client name", lastServiceDate: "Last service", unitType: "Unit type", saveUnit: "Save unit", cancel: "Cancel", deleteUnit: "Delete unit", close: "Close modal", workOrderDetails: "WORK ORDER", notes: "Technician notes", addNotePlaceholder: "Add a timestamped note...", addNote: "Add note", parts: "Labor & parts", description: "Description", amount: "Amount", add: "Add", delete: "Delete", deleteWorkOrder: "Delete work order", done: "Done", createTitle: "Create work order", addUnitTitle: "Add fleet unit", editUnitTitle: "Edit fleet unit", addToRepertory: "Add unit to repertory", part: "Part", labor: "Labor", loginTitle: "RPM Diesel Dashboard", loginSubtitle: "Sign in to manage fleet operations", name: "Name", password: "Password", signIn: "Sign in", invalidLogin: "Enter a valid name and password.", signedInAs: "Signed in as", signOut: "Sign out", language: "Switch language",
-    "In Progress": "In Progress", "Waiting on Parts": "Waiting on Parts", "Waiting on Estimates": "Waiting on Estimates", Completed: "Completed", High: "High", Normal: "Normal", Low: "Low",
+    userDirectory: "USER DIRECTORY", manageProfiles: "Manage dashboard access and roles", addTechnician: "+ Add technician", role: "Role", active: "Active", disabled: "Disabled", admin: "Admin", removeUser: "Remove user", changePassword: "Change password", adminChangePassword: "Set password", currentPassword: "Current password", newPassword: "New password", confirmPassword: "Confirm new password", updatePassword: "Update password", technicianList: "Technician list", punchHistory: "Punch history", punchedBy: "Punched by", clockIn: "Clock in", clockOut: "Clock out", totalHours: "Total hours", totalWorked: "Total worked hours", activePunch: "Active", noPunches: "No punches recorded yet.", noData: "—", "In Progress": "In Progress", "Waiting on Parts": "Waiting on Parts", "Waiting on Estimates": "Waiting on Estimates", Completed: "Completed", High: "High", Normal: "Normal", Low: "Low",
   },
   fr: {
-    dashboardOverview: "Vue d'ensemble", activeJobQueue: "File des travaux actifs", unitManagement: "Gestion des unités", workspace: "ESPACE DE TRAVAIL",
+    dashboardOverview: "Vue d'ensemble", activeJobQueue: "File des travaux actifs", unitManagement: "Gestion des unités", clientManagement: "Gestion des clients", punchClock: "Poinçonneuse", punchSubtitle: "Suivez votre temps de travail et associez-le à un ordre de travail.", userManagement: "Gestion des utilisateurs", usersSubtitle: "Gérez les accès, les rôles et les profils actifs.", clientsSubtitle: "Consultez et gérez tous les clients de la flotte.", workspace: "ESPACE DE TRAVAIL",
     goodMorning: "Bonjour", overviewSubtitle: "Voici ce qui se passe dans votre flotte aujourd'hui.", jobsSubtitle: "Surveillez et coordonnez chaque demande de service active.", unitsSubtitle: "Gardez les dossiers de votre flotte à jour et prête pour le service.", systemOperational: "Système opérationnel", lastSynced: "Synchronisé à l'instant", emergency: "Urgence", reviewUnits: "Réviser les unités →",
     workOrders: "ORDRES DE TRAVAIL", activeJobs: "Travaux actifs", totalInProgress: "Total en cours", waitingParts: "En attente de pièces", waitingEstimates: "En attente d'estimations", fleetHealth: "ÉTAT DE LA FLOTTE", unitStatus: "État des unités", totalUnits: "Total des unités répertoriées", fleetRecords: "Tous les dossiers sont à jour", pmCompliance: "Conformité PM", overduePm: "unités en retard de PM", fieldOperations: "OPÉRATIONS TERRAIN", fieldService: "Service sur le terrain", techsOnRoad: "Techniciens sur la route", unassignedCalls: "Appels non assignés", responseTime: "Temps de réponse moyen", recentActivity: "ACTIVITÉ RÉCENTE", latestUpdates: "Dernières mises à jour", viewAll: "Voir tout →", quickActions: "ACTIONS RAPIDES", quickQuestion: "Que voulez-vous faire?", createWorkOrder: "Créer un ordre de travail", startService: "Démarrer une demande de service", addUnit: "Ajouter une unité", registerAsset: "Enregistrer un véhicule ou un actif", serviceOperations: "OPÉRATIONS DE SERVICE", workOrderQueue: "File des ordres de travail", newWorkOrder: "+ Nouvel ordre de travail", export: "Exporter ↓", assetDatabase: "BASE DES ACTIFS", fleetDirectory: "Répertoire de la flotte", addNewUnit: "+ Ajouter une unité", filters: "Filtres ≡", assignedClient: "CLIENT ASSIGNÉ", lastService: "DERNIER SERVICE", lastUsage: "DERNIÈRE UTILISATION", pmNeeded: "PM requis", pmClear: "PM à jour", workOrder: "Ordre de travail", unitClient: "Unité / client", technician: "Technicien", priority: "Priorité", status: "Statut", updated: "Mis à jour", fleetUnit: "Unité de la flotte", selectUnit: "Sélectionner une unité du répertoire", addNewUnitOption: "+ Ajouter une unité au répertoire", serviceRequest: "Demande de service", lastServiceUsage: "Kilométrage / heures depuis le dernier service", unitNumber: "Numéro d'unité", vin: "NIV", clientName: "Nom du client", lastServiceDate: "Dernier service", unitType: "Type d'unité", saveUnit: "Enregistrer l'unité", cancel: "Annuler", deleteUnit: "Supprimer l'unité", close: "Fermer la fenêtre", workOrderDetails: "ORDRE DE TRAVAIL", notes: "Notes du technicien", addNotePlaceholder: "Ajouter une note horodatée...", addNote: "Ajouter la note", parts: "Main-d'œuvre et pièces", description: "Description", amount: "Montant", add: "Ajouter", delete: "Supprimer", deleteWorkOrder: "Supprimer l'ordre de travail", done: "Terminé", createTitle: "Créer un ordre de travail", addUnitTitle: "Ajouter une unité", editUnitTitle: "Modifier l'unité", addToRepertory: "Ajouter au répertoire", part: "Pièce", labor: "Main-d'œuvre", loginTitle: "Tableau de bord RPM Diesel", loginSubtitle: "Connectez-vous pour gérer les opérations de flotte", name: "Nom", password: "Mot de passe", signIn: "Se connecter", invalidLogin: "Entrez un nom et un mot de passe valides.", signedInAs: "Session de", signOut: "Se déconnecter", language: "Changer de langue",
-    "In Progress": "En cours", "Waiting on Parts": "En attente de pièces", "Waiting on Estimates": "En attente d'estimations", Completed: "Terminé", High: "Élevée", Normal: "Normale", Low: "Faible",
+    userDirectory: "RÉPERTOIRE DES UTILISATEURS", manageProfiles: "Gérez les accès et les rôles du tableau de bord", addTechnician: "+ Ajouter un technicien", role: "Rôle", active: "Actif", disabled: "Désactivé", admin: "Administrateur", removeUser: "Supprimer l'utilisateur", changePassword: "Changer le mot de passe", adminChangePassword: "Définir le mot de passe", currentPassword: "Mot de passe actuel", newPassword: "Nouveau mot de passe", confirmPassword: "Confirmer le nouveau mot de passe", updatePassword: "Mettre à jour le mot de passe", technicianList: "Liste des techniciens", punchHistory: "Historique des poinçons", punchedBy: "Pointé par", clockIn: "Début", clockOut: "Fin", totalHours: "Heures totales", totalWorked: "Heures travaillées totales", activePunch: "Actif", noPunches: "Aucun poinçon enregistré.", noData: "—", "In Progress": "En cours", "Waiting on Parts": "En attente de pièces", "Waiting on Estimates": "En attente d'estimations", Completed: "Terminé", High: "Élevée", Normal: "Normale", Low: "Faible",
   },
 };
 
@@ -178,6 +189,13 @@ function loadStored<T>(key: string, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+function createId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function StatusPill({ status, language }: { status: JobStatus; language: Language }) {
@@ -222,16 +240,50 @@ function MetricCard({
   );
 }
 
+function PunchClock({ activeEntry, jobs, language, onClockIn, onClockOut }: { activeEntry?: CloudTimeEntry; jobs: Job[]; language: Language; onClockIn: (workOrderId: string | null) => void; onClockOut: () => void }) {
+  const [workOrderId, setWorkOrderId] = useState("");
+  const [now, setNow] = useState(0);
+  useEffect(() => {
+    if (!activeEntry) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [activeEntry]);
+  const elapsed = activeEntry ? Math.max(0, now - new Date(activeEntry.clockIn).getTime()) : 0;
+  const elapsedLabel = `${String(Math.floor(elapsed / 3600000)).padStart(2, "0")}:${String(Math.floor((elapsed % 3600000) / 60000)).padStart(2, "0")}:${String(Math.floor((elapsed % 60000) / 1000)).padStart(2, "0")}`;
+  return <div className={`punch-clock ${activeEntry ? "punch-active" : ""}`}><span className="punch-indicator" /><div className="punch-copy"><strong>{activeEntry ? (language === "en" ? "On the clock" : "Pointé") : (language === "en" ? "Off the clock" : "Non pointé")}</strong><small>{activeEntry ? elapsedLabel : (language === "en" ? "Ready to start" : "Prêt à commencer")}</small></div>{!activeEntry ? <><select value={workOrderId} onChange={(event) => setWorkOrderId(event.target.value)} aria-label={language === "en" ? "Assign work order" : "Assigner un ordre de travail"}><option value="">{language === "en" ? "No work order" : "Aucun ordre"}</option>{jobs.filter((job) => job.status !== "Completed").map((job) => <option key={job.id} value={job.id}>{job.unit} · {job.issue}</option>)}</select><button className="punch-button punch-in" onClick={() => onClockIn(workOrderId || null)}>{language === "en" ? "Clock In" : "Pointer"}</button></> : <button className="punch-button punch-out" onClick={onClockOut}>{language === "en" ? "Clock Out" : "Dépointer"}</button>}</div>;
+}
+
 export default function Home() {
+  const clientReady = useSyncExternalStore(() => () => undefined, () => true, () => false);
   const [language, setLanguage] = useState<Language>(() => loadStored("rpm-diesel-language", "en" as Language));
-  const [activeUser, setActiveUser] = useState<string | null>(() => loadStored("rpm-diesel-session", null as string | null));
+  const [activeUser, setActiveUser] = useState<string | null>(() => {
+    const stored = loadStored<string | { name?: string } | null>("rpm-diesel-session", null);
+    return typeof stored === "string" ? stored : stored?.name ?? null;
+  });
+  const [userAccounts, setUserAccounts] = useState<UserAccount[]>(() => loadStored<UserAccount[]>("rpm-diesel-users", defaultUsers).map((account) => ({ ...account, isTechnician: account.isTechnician ?? (account.role === "Technician" || account.name === "Marc") })));
+  const [newUserName, setNewUserName] = useState("");
+  const [newUserPassword, setNewUserPassword] = useState("12345678");
+  const [newUserIsTechnician, setNewUserIsTechnician] = useState(true);
+  const [passwordTargetId, setPasswordTargetId] = useState<string | null>(null);
+  const [managedPassword, setManagedPassword] = useState("12345678");
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [passwordEditorOpen, setPasswordEditorOpen] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [nextPassword, setNextPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
   const [loginName, setLoginName] = useState("Andrée-Anne");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState(false);
   const [section, setSection] = useState<Section>("overview");
   const [jobFilter, setJobFilter] = useState<"All" | JobStatus>("All");
   const [unitSearch, setUnitSearch] = useState("");
-  const [modal, setModal] = useState<"job" | "unit" | "detail" | null>(null);
+  const [clientSearch, setClientSearch] = useState("");
+  const [clientData, setClientData] = useState<string[]>(() => loadStored("rpm-diesel-clients", defaultClients));
+  const [editingClient, setEditingClient] = useState<string | null>(null);
+  const [editingClientName, setEditingClientName] = useState("");
+  const [modal, setModal] = useState<"job" | "unit" | "detail" | "history" | null>(null);
+  const [historyUnit, setHistoryUnit] = useState<Unit | null>(null);
   const [detailJobId, setDetailJobId] = useState<string | null>(null);
   const [editingUnitId, setEditingUnitId] = useState<string | null>(null);
   const [returnToJob, setReturnToJob] = useState(false);
@@ -254,22 +306,35 @@ export default function Home() {
     quantity: "1",
     amount: "",
   });
+  const [manualTimeUser, setManualTimeUser] = useState("");
+  const [manualTimeJob, setManualTimeJob] = useState("");
+  const [manualTimeHours, setManualTimeHours] = useState("");
   const [unitData, setUnitData] = useState<Unit[]>(units);
   const [jobData, setJobData] = useState<Job[]>(jobs);
+  const [timeEntries, setTimeEntries] = useState<CloudTimeEntry[]>([]);
   const [cloudReady, setCloudReady] = useState(!hasSupabaseConfig);
   const [cloudError, setCloudError] = useState<string | null>(null);
   const remoteJobsUpdate = useRef(false);
   const remoteUnitsUpdate = useRef(false);
+  const remoteUsersUpdate = useRef(false);
   const cloudPollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const cloudRefreshInFlight = useRef(false);
   const t = (key: string) => translations[language][key] ?? key;
-  const accounts = ["Andrée-Anne", "Marc", "Dannick"];
+  const greeting = new Date().getHours() < 12
+    ? language === "en" ? "Good morning" : "Bonjour"
+    : language === "en" ? "Good afternoon" : "Bon après-midi";
+  const workloadAlert = language === "en"
+    ? { assigned: "in-progress job(s) assigned to you.", continue: "Continue these jobs from the active queue.", view: "View jobs →" }
+    : { assigned: "travail(aux) en cours vous est assigné.", continue: "Continuez ces travaux depuis la file active.", view: "Voir les travaux →" };
+  const accounts = userAccounts.filter((account) => account.active);
   const signIn = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (accounts.includes(loginName) && loginPassword === "12345678") {
-      setActiveUser(loginName);
+    const normalizeName = (value: string) => value.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    const account = accounts.find((candidate) => normalizeName(candidate.name) === normalizeName(loginName) && candidate.password === loginPassword.trim());
+    if (account) {
+      setActiveUser(account.name);
       setLoginError(false);
-      window.localStorage.setItem("rpm-diesel-session", JSON.stringify(loginName));
+      window.localStorage.setItem("rpm-diesel-session", JSON.stringify(account));
     } else {
       setLoginError(true);
     }
@@ -283,10 +348,84 @@ export default function Home() {
     setLanguage(next);
     window.localStorage.setItem("rpm-diesel-language", JSON.stringify(next));
   };
+  const activeTimeEntry = timeEntries.find((entry) => entry.userId === activeUser && entry.status === "active");
+  const clockIn = async (workOrderId: string | null) => {
+    if (!activeUser || activeTimeEntry) return;
+    try {
+      const created = await createTimeEntry({ userId: activeUser, userName: activeUser, workOrderId, clockIn: new Date().toISOString() });
+      if (created) setTimeEntries((current) => [created, ...current]);
+      else setCloudError("Punch Clock is not installed in Supabase yet. Run supabase/schema.sql to create time_entries.");
+    } catch (error) { setCloudError(`Clock in failed: ${(error as Error).message}`); }
+  };
+  const clockOut = async () => {
+    if (!activeTimeEntry) return;
+    const clockOutTime = new Date();
+    const totalHours = (clockOutTime.getTime() - new Date(activeTimeEntry.clockIn).getTime()) / 3600000;
+    try {
+      await completeTimeEntry(activeTimeEntry.id, clockOutTime.toISOString(), Number(totalHours.toFixed(2)));
+      setTimeEntries((current) => current.map((entry) => entry.id === activeTimeEntry.id ? { ...entry, clockOut: clockOutTime.toISOString(), totalHours: Number(totalHours.toFixed(2)), status: "completed" } : entry));
+    } catch (error) { setCloudError(`Clock out failed: ${(error as Error).message}`); }
+  };
+  const addManualTime = async () => {
+    const user = userAccounts.find((account) => account.name === manualTimeUser);
+    const hours = Number(manualTimeHours);
+    if (!user || !hours || hours <= 0) return;
+    const clockOutAt = new Date();
+    const clockInAt = new Date(clockOutAt.getTime() - hours * 3600000);
+    try {
+      const created = await createManualTimeEntry({ userId: user.name, userName: user.name, workOrderId: manualTimeJob || null, clockIn: clockInAt.toISOString(), clockOut: clockOutAt.toISOString(), totalHours: Number(hours.toFixed(2)) });
+      if (created) setTimeEntries((current) => [created, ...current]);
+      setManualTimeHours("");
+    } catch (error) { setCloudError(`Manual time entry failed: ${(error as Error).message}`); }
+  };
+  const visibleNavItems = activeUser === "Marc" ? [...navItems, { id: "users" as Section, label: "userManagement", icon: "♙" }] : navItems;
+  const canManageWorkOrders = activeUser === "Marc";
+  const technicianOptions = ["Unassigned", ...userAccounts.filter((account) => account.active && account.isTechnician).map((account) => account.name)];
+  const addUser = () => {
+    const name = newUserName.trim();
+    if (!name || userAccounts.some((account) => account.name.toLowerCase() === name.toLowerCase())) return;
+    setUserAccounts((current) => [...current, { id: `user-${createId()}`, name, role: "Technician", password: newUserPassword || "12345678", active: true, isTechnician: newUserIsTechnician }]);
+    setNewUserName("");
+    setNewUserPassword("12345678");
+    setNewUserIsTechnician(true);
+  };
+  const toggleUser = (id: string) => setUserAccounts((current) => current.map((account) => account.id === id ? { ...account, active: !account.active } : account));
+  const toggleTechnician = (id: string) => setUserAccounts((current) => current.map((account) => account.id === id ? { ...account, isTechnician: !account.isTechnician } : account));
+  const saveManagedPassword = () => {
+    if (!passwordTargetId || managedPassword.length < 8) return;
+    setUserAccounts((current) => current.map((account) => account.id === passwordTargetId ? { ...account, password: managedPassword } : account));
+    setPasswordTargetId(null);
+    setManagedPassword("12345678");
+  };
+  const removeUser = (id: string) => setUserAccounts((current) => current.filter((account) => account.id !== id || account.name === "Marc"));
+  const saveClientEdit = () => {
+    const nextName = editingClientName.trim();
+    if (!editingClient || !nextName) return;
+    setClientData((current) => current.map((client) => client === editingClient ? nextName : client));
+    setEditingClient(null);
+    setEditingClientName("");
+  };
+  const removeClient = (client: string) => {
+    setClientData((current) => current.filter((item) => item !== client));
+  };
+  const changeOwnPassword = () => {
+    const account = userAccounts.find((candidate) => candidate.name === activeUser);
+    if (!account || currentPassword !== account.password) { setPasswordError("Current password is incorrect."); return; }
+    if (nextPassword.length < 8) { setPasswordError("New password must be at least 8 characters."); return; }
+    if (nextPassword !== confirmPassword) { setPasswordError("New passwords do not match."); return; }
+    setUserAccounts((current) => current.map((candidate) => candidate.name === activeUser ? { ...candidate, password: nextPassword } : candidate));
+    setCurrentPassword(""); setNextPassword(""); setConfirmPassword(""); setPasswordError(""); setPasswordEditorOpen(false); setProfileMenuOpen(false);
+  };
+  useEffect(() => {
+    window.localStorage.setItem("rpm-diesel-users", JSON.stringify(userAccounts));
+  }, [userAccounts]);
+  useEffect(() => {
+    window.localStorage.setItem("rpm-diesel-clients", JSON.stringify(clientData));
+  }, [clientData]);
   useEffect(() => {
     let cancelled = false;
     if (!hasSupabaseConfig) return;
-    loadFleetData().then((data) => {
+    Promise.all([loadFleetData(), loadUsers(), loadTimeEntries()]).then(([data, cloudUsers, cloudTimeEntries]) => {
       if (cancelled) return;
       if (data) {
         remoteJobsUpdate.current = true;
@@ -294,13 +433,20 @@ export default function Home() {
         setJobData(data.jobs as Job[]);
         setUnitData(data.units as Unit[]);
       }
+      if (cloudUsers?.length) { remoteUsersUpdate.current = true; setUserAccounts(cloudUsers as UserAccount[]); }
+      if (cloudTimeEntries) setTimeEntries(cloudTimeEntries);
+      setCloudError(null);
       setCloudReady(true);
     }).catch((error: Error) => {
       setCloudError(error.message);
       setCloudReady(true);
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [activeUser]);
+  useEffect(() => {
+    if (!cloudReady || remoteUsersUpdate.current) { remoteUsersUpdate.current = false; return; }
+    void saveUsers(userAccounts);
+  }, [userAccounts, cloudReady]);
   useEffect(() => {
     if (!cloudReady || remoteJobsUpdate.current) {
       remoteJobsUpdate.current = false;
@@ -344,12 +490,14 @@ export default function Home() {
     const refreshFromCloud = () => {
       if (cloudRefreshInFlight.current) return;
       cloudRefreshInFlight.current = true;
-      void loadFleetData().then((data) => {
+      void Promise.all([loadFleetData(), loadUsers(), loadTimeEntries()]).then(([data, cloudUsers, cloudTimeEntries]) => {
         if (!data) return;
         remoteJobsUpdate.current = true;
         remoteUnitsUpdate.current = true;
         setJobData(data.jobs as Job[]);
         setUnitData(data.units as Unit[]);
+        if (cloudUsers?.length) { remoteUsersUpdate.current = true; setUserAccounts(cloudUsers as UserAccount[]); }
+        if (cloudTimeEntries) setTimeEntries(cloudTimeEntries);
         setCloudError(null);
       }).catch((error: Error) => setCloudError(`Cloud sync retrying: ${error.message}`)).finally(() => {
         cloudRefreshInFlight.current = false;
@@ -357,21 +505,46 @@ export default function Home() {
     };
     refreshFromCloud();
     cloudPollTimer.current = setInterval(refreshFromCloud, 2500);
+    const applyUserChange = (change: RealtimeChange<CloudUser>) => {
+      remoteUsersUpdate.current = true;
+      setUserAccounts((current) => {
+        const userId = change.record?.id ?? change.oldRecord?.id;
+        if (!userId) return current;
+        if (change.eventType === "DELETE") return current.filter((account) => account.id !== userId);
+        if (!change.record) return current;
+        const nextUser = change.record as UserAccount;
+        return current.some((account) => account.id === nextUser.id) ? current.map((account) => account.id === nextUser.id ? nextUser : account) : [...current, nextUser];
+      });
+    };
+    const applyTimeEntryChange = (change: RealtimeChange<CloudTimeEntry>) => {
+      setTimeEntries((current) => {
+        const entryId = change.record?.id ?? change.oldRecord?.id;
+        if (!entryId) return current;
+        if (change.eventType === "DELETE") return current.filter((entry) => entry.id !== entryId);
+        if (!change.record) return current;
+        return current.some((entry) => entry.id === entryId) ? current.map((entry) => entry.id === entryId ? change.record as CloudTimeEntry : entry) : [change.record as CloudTimeEntry, ...current];
+      });
+    };
     const unsubscribe = subscribeToFleet(applyUnitChange, applyJobChange, (message) => {
       setCloudError("Realtime transport unavailable; cloud polling is active.");
       refreshFromCloud();
       console.warn("Supabase realtime transport:", message);
-    });
+    }, applyUserChange, applyTimeEntryChange);
     return () => {
       unsubscribe();
       if (cloudPollTimer.current) clearInterval(cloudPollTimer.current);
       cloudPollTimer.current = null;
     };
-  }, [cloudReady]);
+  }, [cloudReady, activeUser]);
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === "rpm-diesel-session") setActiveUser(event.newValue ? JSON.parse(event.newValue) as string : null);
+      if (event.key === "rpm-diesel-session") {
+        const stored = event.newValue ? JSON.parse(event.newValue) as string | { name?: string } : null;
+        setActiveUser(typeof stored === "string" ? stored : stored?.name ?? null);
+      }
       if (event.key === "rpm-diesel-language" && event.newValue) setLanguage(JSON.parse(event.newValue) as Language);
+      if (event.key === "rpm-diesel-users" && event.newValue) setUserAccounts(JSON.parse(event.newValue) as UserAccount[]);
+      if (event.key === "rpm-diesel-clients" && event.newValue) setClientData(JSON.parse(event.newValue) as string[]);
     };
     window.addEventListener("storage", handleStorage);
     return () => window.removeEventListener("storage", handleStorage);
@@ -388,6 +561,10 @@ export default function Home() {
       ),
     [unitData, unitSearch],
   );
+  const filteredClients = useMemo(() => clientData.filter((client) => client.toLowerCase().includes(clientSearch.toLowerCase())), [clientData, clientSearch]);
+  if (!clientReady) {
+    return <main className="login-shell" aria-label="Loading RPM Diesel dashboard" />;
+  }
   if (!activeUser) {
     return (
       <main className="login-shell">
@@ -397,9 +574,9 @@ export default function Home() {
           <h1>{t("loginTitle")}</h1>
           <p className="login-subtitle">{t("loginSubtitle")}</p>
           <form onSubmit={signIn} className="login-form">
-            <label>{t("name")}<select value={loginName} onChange={(event) => setLoginName(event.target.value)}>{accounts.map((account) => <option key={account}>{account}</option>)}</select></label>
+            <label>{t("name")}<select value={loginName} onChange={(event) => setLoginName(event.target.value)}>{accounts.map((account) => <option key={account.id}>{account.name}</option>)}</select></label>
             <label>{t("password")}<input type="password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} autoComplete="current-password" /></label>
-            {loginError && <p className="login-error">{t("invalidLogin")}</p>}
+            {loginError && <div className="login-error" role="alert"><strong>{language === "en" ? "Invalid password" : "Mot de passe invalide"}</strong><span>{t("invalidLogin")}</span></div>}
             <button className="primary-button" type="submit">{t("signIn")}</button>
           </form>
           <button className="language-button login-language" onClick={toggleLanguage}>{language === "en" ? "FR" : "EN"}</button>
@@ -410,6 +587,10 @@ export default function Home() {
   const activeJob = detailJobId
     ? jobData.find((job) => job.id === detailJobId)
     : undefined;
+  const workedHoursFor = (workOrderId: string) => timeEntries.filter((entry) => entry.workOrderId === workOrderId && entry.totalHours != null).reduce((total, entry) => total + (entry.totalHours ?? 0), 0).toFixed(2);
+  const currentAccount = userAccounts.find((account) => account.name === activeUser);
+  const visibleTimeEntries = currentAccount?.role === "Admin" ? timeEntries : timeEntries.filter((entry) => entry.userId === activeUser);
+  const longPunchEntries = timeEntries.filter((entry) => entry.userId === activeUser && entry.workOrderId && entry.totalHours != null && entry.totalHours >= 7);
   const syncUnitFromJob = (
     job: Job,
     status: JobStatus = job.status,
@@ -437,11 +618,16 @@ export default function Home() {
     const job = jobData.find((item) => item.id === id);
     if (job) syncUnitFromJob(job, status);
     if (job) void writeActivityLog(activeUser ?? "Unknown", "status_changed", "work_order", id, { status });
-    setJobData((current) =>
-      current.map((item) =>
-        item.id === id ? { ...item, status, updated: "Just now" } : item,
-      ),
-    );
+    if (!job) return;
+    const updatedJob = { ...job, status, updated: "Just now" };
+    setJobData((current) => current.map((item) => item.id === id ? updatedJob : item));
+    void saveJobs([updatedJob]).catch((error: Error) => setCloudError(`Work order update failed: ${error.message}`));
+  };
+  const updateJobRecord = (job: Job, field: "tech" | "priority" | "status" | "usage" | "issue", value: string) => {
+    const updatedJob = { ...job, [field]: value, updated: "Just now" } as Job;
+    setJobData((current) => current.map((item) => item.id === job.id ? updatedJob : item));
+    void saveJobs([updatedJob]).catch((error: Error) => setCloudError(`Work order update failed: ${error.message}`));
+    return updatedJob;
   };
   const openModal = (kind: "job" | "unit") => {
     setForm({
@@ -467,6 +653,7 @@ export default function Home() {
     setModal("detail");
   };
   const openUnitEditor = (unit: Unit) => {
+    if (modal === "history") return;
     setEditingUnitId(unit.unit);
     setForm({
       unit: unit.unit,
@@ -482,6 +669,7 @@ export default function Home() {
     });
     setModal("unit");
   };
+  const openUnitHistory = (unit: Unit) => { setHistoryUnit(unit); setEditingUnitId(null); setModal("history"); };
   const closeModal = () => setModal(null);
   const updateForm = (field: keyof typeof form, value: string) =>
     setForm((current) => ({ ...current, [field]: value }));
@@ -502,7 +690,7 @@ export default function Home() {
   const saveNote = () => {
     if (!detailJobId || !noteText.trim()) return;
     const note: Note = {
-      id: crypto.randomUUID(),
+      id: createId(),
       text: noteText.trim(),
       author: activeUser ?? "RPM Diesel",
       createdAt: new Date().toISOString(),
@@ -544,7 +732,7 @@ export default function Home() {
     if (!detailJobId || !lineItem.description.trim() || !lineItem.amount)
       return;
     const item: LineItem = {
-      id: crypto.randomUUID(),
+      id: createId(),
       kind: lineItem.kind,
       description: lineItem.description.trim(),
       quantity: Number(lineItem.quantity) || 1,
@@ -601,27 +789,23 @@ export default function Home() {
           : job,
       ),
     );
-  const updateJob = (
-    field: "tech" | "priority" | "status" | "usage",
+  const updateJob = async (
+    field: "tech" | "priority" | "status" | "usage" | "issue",
     value: string,
   ) => {
     if (!detailJobId) return;
     const job = jobData.find((item) => item.id === detailJobId);
-    if (job && (field === "status" || field === "usage"))
+    if (!job) return;
+    if (field === "status" || field === "usage")
       syncUnitFromJob(
         job,
         field === "status" ? (value as JobStatus) : job.status,
         field === "usage" ? value : job.usage,
       );
-    setJobData((current) =>
-      current.map((item) =>
-        item.id === detailJobId
-          ? { ...item, [field]: value, updated: "Just now" }
-          : item,
-      ),
-    );
+    updateJobRecord(job, field, value);
   };
   const deleteJob = (id: string) => {
+    if (!canManageWorkOrders) return;
     setJobData((current) => current.filter((job) => job.id !== id));
     void removeJob(id);
     void writeActivityLog(activeUser ?? "Unknown", "deleted", "work_order", id);
@@ -641,11 +825,11 @@ export default function Home() {
         unit.unit === unitId ? { ...unit, overdue: !unit.overdue } : unit,
       ),
     );
-  const submitForm = (event: React.FormEvent<HTMLFormElement>) => {
+  const submitForm = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (modal === "job") {
       const newJob: Job = {
-        id: `WO-${2420 + jobData.length}`,
+        id: `WO-${Date.now()}-${createId().slice(0, 8)}`,
         unit: form.unit,
         client: form.client,
         tech: form.tech,
@@ -657,6 +841,12 @@ export default function Home() {
         notes: [],
         lineItems: [],
       };
+      try {
+        await saveJobs([newJob]);
+      } catch (error) {
+        setCloudError(`Work order was not saved: ${(error as Error).message}`);
+        return;
+      }
       setJobData((current) => [newJob, ...current]);
       syncUnitFromJob(newJob, newJob.status, newJob.usage);
       void writeActivityLog(activeUser ?? "Unknown", "created", "work_order", newJob.id, { unit: newJob.unit });
@@ -673,6 +863,16 @@ export default function Home() {
         overdue: false,
         usage: form.usage,
       };
+      try {
+        if (editingUnitId) {
+          await saveUnits([newUnit]);
+        } else {
+          await saveUnits([newUnit]);
+        }
+      } catch (error) {
+        setCloudError(`Unit was not saved: ${(error as Error).message}`);
+        return;
+      }
       setUnitData((current) =>
         editingUnitId
           ? current.map((unit) =>
@@ -699,7 +899,7 @@ export default function Home() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div className="brand-lockup">
+        <button className="brand-lockup brand-home-button" onClick={() => { setSection("overview"); closeModal(); }} aria-label="Go to dashboard overview">
           <Image
             className="brand-logo"
             src="/logo3.png"
@@ -709,23 +909,35 @@ export default function Home() {
             priority
           />
           <span className="brand-name">
-            RPM <strong>DIESEL</strong>
+            RPM <strong className="brand-diesel">DIESEL</strong>
           </span>
-        </div>
+        </button>
         <div className="topbar-actions">
-          <a href="tel:4509992221" className="emergency-button">
-            ◉ <span className="desktop-only">{t("emergency")} </span>450 999-2221
-          </a>
           <button className="language-button" onClick={toggleLanguage} aria-label={t("language")}>{language === "en" ? "FR" : "EN"}</button>
           <span className="profile-name">{activeUser}</span>
-          <button className="avatar" onClick={signOut} title={`${t("signedInAs")} ${activeUser}`}>{activeUser.slice(0, 2).toUpperCase()}</button>
+          <div className="profile-menu-wrap">
+            <button className="avatar" onClick={() => setProfileMenuOpen((open) => !open)} title={`${t("signedInAs")} ${activeUser}`}>{activeUser.slice(0, 2).toUpperCase()}</button>
+            {profileMenuOpen && <div className="profile-menu">
+              {activeUser && <>
+                <button className="profile-menu-item" onClick={() => { setPasswordEditorOpen((open) => !open); setPasswordError(""); }}>{t("changePassword")}</button>
+                {passwordEditorOpen && <div className="password-editor">
+                  <input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} placeholder={t("currentPassword")} aria-label={t("currentPassword")} />
+                  <input type="password" value={nextPassword} onChange={(event) => setNextPassword(event.target.value)} placeholder={t("newPassword")} aria-label={t("newPassword")} />
+                  <input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder={t("confirmPassword")} aria-label={t("confirmPassword")} />
+                  {passwordError && <small className="password-error">{passwordError}</small>}
+                  <button className="primary-button" onClick={changeOwnPassword}>{t("updatePassword")}</button>
+                </div>}
+              </>}
+              <button className="profile-menu-item profile-signout" onClick={signOut}>{t("signOut")}</button>
+            </div>}
+          </div>
         </div>
       </header>
       <div className="dashboard-layout">
         <aside className="sidebar">
           <p className="sidebar-label">{t("workspace")}</p>
           <nav className="sidebar-nav">
-            {navItems.map((item) => (
+            {visibleNavItems.map((item) => (
               <button
                 key={item.id}
                 onClick={() => setSection(item.id)}
@@ -747,54 +959,67 @@ export default function Home() {
         <main className="main-content">
           {!hasSupabaseConfig && <div className="cloud-banner cloud-warning">Cloud sync is not configured. Add `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` to `.env.local`.</div>}
           {cloudError && <div className="cloud-banner cloud-warning">{cloudError}</div>}
-          <div className="mobile-nav">
-            {navItems.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => setSection(item.id)}
-                className={section === item.id ? "mobile-nav-active" : ""}
-              >
-                {t(item.label)}
-              </button>
-            ))}
+          <div className="mobile-nav-select">
+            <span className="mobile-nav-label">{language === "en" ? "Section" : "Section"}</span>
+            <select value={section} onChange={(event) => setSection(event.target.value as Section)} aria-label={language === "en" ? "Choose section" : "Choisir une section"}>
+              {visibleNavItems.map((item) => <option key={item.id} value={item.id}>{t(item.label)}</option>)}
+            </select>
           </div>
           <div className="page-heading">
             <div>
               <p className="breadcrumb">
                 RPM DIESEL <span>/</span>{" "}
-                {t(navItems.find((item) => item.id === section)?.label ?? "")}
+                {t(visibleNavItems.find((item) => item.id === section)?.label ?? "")}
               </p>
               <h1>
                 {section === "overview"
-                  ? `${language === "en" ? "Good morning" : "Bonjour"}, ${activeUser}`
-                  : t(navItems.find((item) => item.id === section)?.label ?? "")}
+                  ? `${greeting}, ${activeUser}`
+                  : t(visibleNavItems.find((item) => item.id === section)?.label ?? "")}
               </h1>
               <p className="page-subtitle">
                 {section === "overview"
                   ? t("overviewSubtitle")
                   : section === "jobs"
                     ? t("jobsSubtitle")
-                    : t("unitsSubtitle")}
+                    : section === "units"
+                        ? t("unitsSubtitle")
+                        : section === "users"
+                          ? t("usersSubtitle")
+                          : t("clientsSubtitle")}
               </p>
             </div>
             <div className="date-chip">□ &nbsp; May 24, 2024 &nbsp;⌄</div>
           </div>
           {section === "overview" && (
             <>
+              {(() => {
+                const openTechnicianJobs = jobData.filter((job) => job.tech === activeUser && job.status === "In Progress").length;
+                return openTechnicianJobs > 0 ? (
+                  <div className="alert-banner alert-danger">
+                    <span className="alert-icon">!</span>
+                    <div>
+                      <b>{openTechnicianJobs} {workloadAlert.assigned.replace("job(s)", openTechnicianJobs === 1 ? "job" : "jobs").replace("travail(aux)", openTechnicianJobs === 1 ? "travail" : "travaux")}</b>
+                      <span>{workloadAlert.continue}</span>
+                    </div>
+                    <button onClick={() => setSection("jobs")}>{workloadAlert.view}</button>
+                  </div>
+                ) : null;
+              })()}
+              {longPunchEntries.length > 0 && <div className="alert-banner alert-warning">
+                <span className="alert-icon">!</span>
+                <div>
+                  <b>{language === "en" ? `${longPunchEntries.length} punch${longPunchEntries.length === 1 ? "" : "es"} exceeds 7.00 hours.` : `${longPunchEntries.length} poinçon${longPunchEntries.length === 1 ? "" : "s"} dépasse 7,00 heures.`}</b>
+                  <span>{language === "en" ? "Please verify the clock-out time and work order." : "Veuillez vérifier l'heure de dépointage et l'ordre de travail."}</span>
+                </div>
+                <button onClick={() => setSection("punch")}>{language === "en" ? "Review punches →" : "Vérifier les poinçons →"}</button>
+              </div>}
               <div className="alert-banner">
                 <span className="alert-icon">!</span>
                 <div>
-                  <b>
-                    {unitData.filter((unit) => unit.overdue).length} {t("overduePm")}
-                  </b>
-                  <span>
-                    {" "}
-                    {language === "en" ? " Schedule service before they go back on the road." : " Planifiez le service avant leur retour sur la route."}
-                  </span>
+                  <b>{unitData.filter((unit) => unit.overdue).length} {t("overduePm")}</b>
+                  <span>{language === "en" ? " Schedule service before they go back on the road." : " Planifiez le service avant leur retour sur la route."}</span>
                 </div>
-                <button onClick={() => setSection("units")}>
-                  {t("reviewUnits")}
-                </button>
+                <button onClick={() => setSection("units")}>{t("reviewUnits")}</button>
               </div>
               <section className="metrics-grid">
                 <div className="section-card metric-group">
@@ -807,18 +1032,18 @@ export default function Home() {
                   </div>
                   <MetricCard
                     label={t("totalInProgress")}
-                    value="24"
-                    detail="↑ 8% from last week"
+                    value={String(jobData.filter((job) => job.status === "In Progress").length)}
+                    detail={language === "en" ? "Live from the work-order queue" : "Données en direct de la file des travaux"}
                     icon="↗"
                   />
                   <div className="mini-metrics">
                     <div>
                       <span>● {t("waitingParts")}</span>
-                      <b>7</b>
+                      <b>{jobData.filter((job) => job.status === "Waiting on Parts").length}</b>
                     </div>
                     <div>
                       <span>● {t("waitingEstimates")}</span>
-                      <b>4</b>
+                      <b>{jobData.filter((job) => job.status === "Waiting on Estimates").length}</b>
                     </div>
                   </div>
                 </div>
@@ -835,7 +1060,7 @@ export default function Home() {
                     value={String(unitData.length)}
                     detail="All fleet records up to date"
                     tone="blue"
-                    icon="▣"
+                    icon="↗"
                   />
                   <div className="unit-progress">
                     <div className="progress-label">
@@ -868,20 +1093,20 @@ export default function Home() {
                   </div>
                   <MetricCard
                     label={t("techsOnRoad")}
-                    value="12"
-                    detail="↑ 2 since 8:00 AM"
+                    value={String(new Set(jobData.filter((job) => job.status !== "Completed" && job.tech !== "Unassigned").map((job) => job.tech)).size)}
+                    detail={language === "en" ? "Assigned technicians on active jobs" : "Techniciens assignés aux travaux actifs"}
                     tone="green"
                     icon="↗"
                   />
                   <div className="mini-metrics">
                     <div>
                       <span>● {t("unassignedCalls")}</span>
-                      <b>3</b>
+                      <b>{jobData.filter((job) => job.tech === "Unassigned" && job.status !== "Completed").length}</b>
                     </div>
                     <div>
                       <span>● {t("responseTime")}</span>
                       <b>
-                        42 <small>min</small>
+                        {t("noData")} <small>min</small>
                       </b>
                     </div>
                   </div>
@@ -945,6 +1170,65 @@ export default function Home() {
               </section>
             </>
           )}
+          {section === "punch" && (
+            <section className="section-card full-card punch-page-card">
+              <div className="toolbar"><div><p className="card-kicker">{t("punchClock")}</p><h2>{t("punchClock")}</h2></div></div>
+              <p className="punch-page-copy">{t("punchSubtitle")}</p>
+              <PunchClock activeEntry={activeTimeEntry} jobs={jobData} language={language} onClockIn={clockIn} onClockOut={clockOut} />
+              {canManageWorkOrders && <div className="manual-time-card"><div className="detail-section-heading"><h3>{language === "en" ? "Add technician time manually" : "Ajouter du temps technicien manuellement"}</h3></div><div className="manual-time-form"><select value={manualTimeUser} onChange={(event) => setManualTimeUser(event.target.value)} aria-label={t("technician")}><option value="">{language === "en" ? "Select technician" : "Sélectionner un technicien"}</option>{userAccounts.filter((account) => account.active && account.isTechnician).map((account) => <option key={account.id} value={account.name}>{account.name}</option>)}</select><select value={manualTimeJob} onChange={(event) => setManualTimeJob(event.target.value)} aria-label={t("workOrder")}><option value="">{language === "en" ? "No work order" : "Aucun ordre"}</option>{jobData.filter((job) => job.status !== "Completed").map((job) => <option key={job.id} value={job.id}>{job.unit} · {job.issue}</option>)}</select><input type="number" min="0.01" step="0.01" value={manualTimeHours} onChange={(event) => setManualTimeHours(event.target.value)} placeholder={language === "en" ? "Hours (decimal)" : "Heures (décimal)"} aria-label={language === "en" ? "Hours" : "Heures"} /><button className="primary-button" onClick={addManualTime}>{language === "en" ? "Add time" : "Ajouter le temps"}</button></div></div>}
+              <div className="punch-history-section">
+                <div className="detail-section-heading"><h3>{t("punchHistory")}</h3><span>{timeEntries.length} entries</span></div>
+                <div className="table-wrap"><table className="punch-history-table"><thead><tr><th>{t("punchedBy")}</th><th>{t("workOrder")}</th><th>{t("clockIn")}</th><th>{t("clockOut")}</th><th>{t("totalHours")}</th><th>{t("status")}</th></tr></thead><tbody>{visibleTimeEntries.length ? visibleTimeEntries.map((entry) => <tr key={entry.id}><td><strong>{entry.userName}</strong></td><td>{entry.workOrderId ? (jobData.find((job) => job.id === entry.workOrderId)?.unit ?? entry.workOrderId) : t("noData")}</td><td>{new Date(entry.clockIn).toLocaleString()}</td><td>{entry.clockOut ? new Date(entry.clockOut).toLocaleString() : t("activePunch")}</td><td>{entry.totalHours == null ? t("activePunch") : `${entry.totalHours.toFixed(2)} h`}</td><td><span className={`time-status ${entry.status === "active" ? "time-active" : "time-completed"}`}>{entry.status === "active" ? t("activePunch") : t("Completed")}</span></td></tr>) : <tr><td colSpan={6} className="empty-history">{t("noPunches")}</td></tr>}</tbody></table></div>
+              </div>
+            </section>
+          )}
+          {section === "clients" && (
+            <section className="section-card full-card client-management-card">
+              <div className="toolbar">
+                <div>
+                  <p className="card-kicker">{t("clientManagement")}</p>
+                  <h2>{t("clientManagement")}</h2>
+                </div>
+                <span className="client-count">{filteredClients.length} clients</span>
+              </div>
+              <div className="client-toolbar">
+                <div className="search-box">⌕<input value={clientSearch} onChange={(event) => setClientSearch(event.target.value)} placeholder={language === "en" ? "Search clients..." : "Rechercher des clients..."} aria-label={language === "en" ? "Search clients" : "Rechercher des clients"} /></div>
+                <input className="client-add-input" placeholder={language === "en" ? "New client name" : "Nom du nouveau client"} onKeyDown={(event) => { if (event.key === "Enter") { const input = event.currentTarget; const name = input.value.trim(); if (name && !clientData.includes(name)) { setClientData((current) => [name, ...current]); input.value = ""; } } }} />
+              </div>
+              <div className="client-grid">{filteredClients.map((client) => <div className="client-card" key={client}><span className="client-initial">{client.slice(0, 1).toUpperCase()}</span>{editingClient === client ? <div className="client-edit-form"><input value={editingClientName} onChange={(event) => setEditingClientName(event.target.value)} autoFocus /><div><button className="primary-button" onClick={saveClientEdit}>Save</button><button className="outline-button" onClick={() => setEditingClient(null)}>Cancel</button></div></div> : <><div className="client-card-copy"><strong>{client}</strong><small>{language === "en" ? "Fleet client" : "Client de flotte"}</small></div>{activeUser === "Marc" && <div className="client-actions"><button className="row-action" onClick={() => { setEditingClient(client); setEditingClientName(client); }}>Edit</button><button className="entry-delete" onClick={() => removeClient(client)}>Delete</button></div>}</>}</div>)}</div>
+            </section>
+          )}
+          {section === "users" && activeUser === "Marc" && (
+            <section className="section-card full-card user-management-card">
+              <div className="toolbar">
+                <div>
+                  <p className="card-kicker">{t("userDirectory")}</p>
+                  <h2>{t("userManagement")}</h2>
+                </div>
+              </div>
+              <p className="user-management-copy">{t("manageProfiles")}</p>
+              <div className="user-create-row">
+                <input value={newUserName} onChange={(event) => setNewUserName(event.target.value)} placeholder={t("name")} aria-label={t("name")} />
+                <input type="password" value={newUserPassword} onChange={(event) => setNewUserPassword(event.target.value)} placeholder={t("password")} aria-label={t("password")} />
+                <label className="tech-list-toggle"><input type="checkbox" checked={newUserIsTechnician} onChange={(event) => setNewUserIsTechnician(event.target.checked)} /> {t("technicianList")}</label>
+                <button className="primary-button" onClick={addUser}>{t("addTechnician")}</button>
+              </div>
+              <div className="user-list">
+                {userAccounts.map((account) => (
+                  <div className="user-row" key={account.id}>
+                    <div className="user-avatar">{account.name.slice(0, 2).toUpperCase()}</div>
+                    <div className="user-primary"><b>{account.name}</b><span>{account.role === "Admin" ? t("admin") : t("technician")}</span></div>
+                    <span className={`user-status ${account.active ? "user-active" : "user-disabled"}`}>{account.active ? t("active") : t("disabled")}</span>
+                    <label className="tech-list-toggle"><input type="checkbox" checked={account.isTechnician} onChange={() => toggleTechnician(account.id)} /> {t("technicianList")}</label>
+                    <button className="outline-button" onClick={() => setPasswordTargetId(passwordTargetId === account.id ? null : account.id)}>{t("adminChangePassword")}</button>
+                    {passwordTargetId === account.id && <div className="managed-password-editor"><input type="password" value={managedPassword} onChange={(event) => setManagedPassword(event.target.value)} placeholder={t("newPassword")} /><button className="primary-button" onClick={saveManagedPassword}>{t("updatePassword")}</button></div>}
+                    <button className="outline-button" onClick={() => toggleUser(account.id)}>{account.active ? t("disabled") : t("active")}</button>
+                    {account.name !== "Marc" && <button className="danger-button user-delete" onClick={() => removeUser(account.id)}>{t("removeUser")}</button>}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
           {section === "jobs" && (
             <section className="section-card full-card">
               <div className="toolbar">
@@ -1007,47 +1291,43 @@ export default function Home() {
                         className="interactive-row"
                         onClick={() => openJobDetails(job)}
                       >
-                        <td>
-                          <b>{job.id}</b>
-                          <small>{job.issue}</small>
+                        <td className="work-order-cell">
+                          <span className="work-order-id">{job.id}</span>
+                          <span className="work-description">{job.issue}</span>
                         </td>
-                        <td>
-                          <b>{job.unit}</b>
-                          <small>{job.client}</small>
+                        <td className="unit-client-cell">
+                          <strong>{job.unit}</strong>
+                          <span>{job.client}</span>
                         </td>
-                        <td>
-                          <span
-                            className={
-                              job.tech === "Unassigned"
-                                ? "unassigned"
-                                : "tech-name"
-                            }
+                        <td onClick={(event) => event.stopPropagation()}>
+                          {canManageWorkOrders ? <select
+                            className="inline-job-select technician-select"
+                            value={job.tech}
+                            onChange={(event) => updateJobRecord(job, "tech", event.target.value)}
+                            aria-label={`${t("technician")} ${job.unit}`}
                           >
-                            {job.tech}
-                          </span>
+                            {Array.from(new Set([...technicianOptions, job.tech])).map((tech) => <option key={tech} value={tech}>{tech}</option>)}
+                          </select> : <span className="read-only-job-value">{job.tech}</span>}
                         </td>
-                        <td>
-                          <span
-                            className={`priority priority-${job.priority.toLowerCase()}`}
+                        <td onClick={(event) => event.stopPropagation()}>
+                          {canManageWorkOrders ? <select
+                            className={`inline-job-select priority-select priority-${job.priority.toLowerCase()}`}
+                            value={job.priority}
+                            onChange={(event) => updateJobRecord(job, "priority", event.target.value)}
+                            aria-label={`${t("priority")} ${job.unit}`}
                           >
-                            ● {job.priority}
-                          </span>
+                            {(["High", "Normal", "Low"] as Job["priority"][]).map((priority) => <option key={priority} value={priority}>{t(priority)}</option>)}
+                          </select> : <span className={`read-only-job-value priority-${job.priority.toLowerCase()}`}>{t(job.priority)}</span>}
                         </td>
-                        <td>
-                          <button
-                            className="status-button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setStatus(
-                                job.id,
-                                job.status === "Completed"
-                                  ? "In Progress"
-                                  : "Completed",
-                              );
-                            }}
+                        <td onClick={(event) => event.stopPropagation()}>
+                          {canManageWorkOrders ? <select
+                            className="inline-job-select status-select"
+                            value={job.status}
+                            onChange={(event) => setStatus(job.id, event.target.value as JobStatus)}
+                            aria-label={`${t("status")} ${job.unit}`}
                           >
-                            <StatusPill status={job.status} language={language} />
-                          </button>
+                            {(["In Progress", "Waiting on Parts", "Waiting on Estimates", "Completed"] as JobStatus[]).map((status) => <option key={status} value={status}>{t(status)}</option>)}
+                          </select> : <StatusPill status={job.status} language={language} />}
                         </td>
                         <td className="updated-cell">{job.updated}</td>
                         <td>
@@ -1112,9 +1392,8 @@ export default function Home() {
                 <div className="unit-list">
                   {filteredUnits.map((unit) => (
                     <div
-                      className="unit-row interactive-row"
+                      className="unit-row"
                       key={unit.unit}
-                      onClick={() => openUnitEditor(unit)}
                     >
                       <div className="unit-avatar">{unit.unit.slice(0, 3)}</div>
                       <div className="unit-primary">
@@ -1137,6 +1416,7 @@ export default function Home() {
                       </div>
                       <div className="unit-due">
                         <button
+                          type="button"
                           className={`pm-toggle ${unit.overdue ? "pm-needed" : "pm-clear"}`}
                           onClick={(event) => {
                             event.stopPropagation();
@@ -1149,6 +1429,19 @@ export default function Home() {
                         <small>{unit.due}</small>
                       </div>
                       <button
+                        type="button"
+                        className="history-button"
+                        onPointerDown={(event) => { event.stopPropagation(); event.nativeEvent.stopImmediatePropagation(); }}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          event.nativeEvent.stopImmediatePropagation();
+                          openUnitHistory(unit);
+                        }}
+                      >
+                        {language === "en" ? "History" : "Historique"}
+                      </button>
+                      <button
+                        type="button"
                         className="row-action"
                         onClick={(event) => {
                           event.stopPropagation();
@@ -1162,6 +1455,15 @@ export default function Home() {
                 </div>
               </section>
             </>
+          )}
+          {modal === "history" && historyUnit && (
+            <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeModal(); }}>
+              <div className="modal-card detail-modal unit-history-modal">
+                <div className="modal-header"><div><p className="card-kicker">{language === "en" ? "SERVICE HISTORY" : "HISTORIQUE DE SERVICE"}</p><h2>{historyUnit.unit}</h2><small>{historyUnit.client} · {historyUnit.type}</small></div><button type="button" className="modal-close" onClick={closeModal} aria-label={t("close")}>×</button></div>
+                <div className="detail-section-heading"><h3>{language === "en" ? "Completed work orders" : "Ordres de travail complétés"}</h3><span>{jobData.filter((job) => job.unit === historyUnit.unit && job.status === "Completed").length}</span></div>
+                <div className="service-history-list">{jobData.filter((job) => job.unit === historyUnit.unit && job.status === "Completed").map((job) => <div className="service-history-row" key={job.id}><div><strong>{job.issue}</strong><small>{job.id} · {job.updated}</small></div><span>{job.tech}</span><b>{workedHoursFor(job.id)} h</b><button className="outline-button" onClick={() => openJobDetails(job)}>{language === "en" ? "Open" : "Ouvrir"}</button></div>)}{jobData.filter((job) => job.unit === historyUnit.unit && job.status === "Completed").length === 0 && <p className="empty-history">{language === "en" ? "No completed service history for this unit." : "Aucun historique de service complété pour cette unité."}</p>}</div>
+              </div>
+            </div>
           )}
           {modal === "detail" && activeJob && (
             <div
@@ -1180,6 +1482,7 @@ export default function Home() {
                       {activeJob.unit} · {activeJob.client} · Last service
                       usage: {activeJob.usage}
                     </small>
+                    <span className="work-order-total-hours">{t("totalWorked")}: {workedHoursFor(activeJob.id)} h</span>
                   </div>
                   <button
                     type="button"
@@ -1192,8 +1495,17 @@ export default function Home() {
                 </div>
                 <div className="detail-controls">
                   <label>
+                    {t("serviceRequest")}
+                    <input
+                      value={activeJob.issue}
+                      onChange={(event) =>
+                        updateJob("issue", event.target.value)
+                      }
+                    />
+                  </label>
+                  <label>
                     {t("status")}
-                    <select
+                    {canManageWorkOrders ? <select
                       value={activeJob.status}
                       onChange={(event) =>
                         updateJob("status", event.target.value)
@@ -1209,11 +1521,11 @@ export default function Home() {
                       ).map((status) => (
                         <option key={status} value={status}>{t(status)}</option>
                       ))}
-                    </select>
+                    </select> : <span className="read-only-detail-value"><StatusPill status={activeJob.status} language={language} /></span>}
                   </label>
                   <label>
                     {t("priority")}
-                    <select
+                    {canManageWorkOrders ? <select
                       value={activeJob.priority}
                       onChange={(event) =>
                         updateJob("priority", event.target.value)
@@ -1224,26 +1536,20 @@ export default function Home() {
                           <option key={priority} value={priority}>{t(priority)}</option>
                         ),
                       )}
-                    </select>
+                    </select> : <span className={`read-only-detail-value priority-${activeJob.priority.toLowerCase()}`}>{t(activeJob.priority)}</span>}
                   </label>
                   <label>
                     {t("technician")}
-                    <select
+                    {canManageWorkOrders ? <select
                       value={activeJob.tech}
                       onChange={(event) =>
                         updateJob("tech", event.target.value)
                       }
                     >
-                      {[
-                        "Unassigned",
-                        "Marcus T.",
-                        "Jamie R.",
-                        "Devin L.",
-                        "Sam K.",
-                      ].map((tech) => (
+                      {Array.from(new Set([...technicianOptions, activeJob.tech])).map((tech) => (
                         <option key={tech}>{tech}</option>
                       ))}
-                    </select>
+                    </select> : <span className="read-only-detail-value">{activeJob.tech}</span>}
                   </label>
                   <label>
                     {t("lastServiceUsage")}
@@ -1255,6 +1561,10 @@ export default function Home() {
                       placeholder="184220 KM or 4280 Hrs"
                     />
                   </label>
+                </div>
+                <div className="detail-section work-order-time-section">
+                  <div className="detail-section-heading"><h3>{t("punchHistory")}</h3><span>{timeEntries.filter((entry) => entry.workOrderId === activeJob.id).length} entries</span></div>
+                  <div className="work-order-time-list">{timeEntries.filter((entry) => entry.workOrderId === activeJob.id).map((entry) => <div className="work-order-time-row" key={entry.id}><strong>{entry.userName}</strong><span>{new Date(entry.clockIn).toLocaleString()}</span><span>{entry.clockOut ? new Date(entry.clockOut).toLocaleString() : t("activePunch")}</span><b>{entry.totalHours == null ? t("activePunch") : `${entry.totalHours.toFixed(2)} h`}</b></div>)}{timeEntries.filter((entry) => entry.workOrderId === activeJob.id).length === 0 && <small className="empty-history">{t("noPunches")}</small>}</div>
                 </div>
                 <div className="detail-section">
                   <div className="detail-section-heading">
@@ -1408,12 +1718,12 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="modal-actions">
-                  <button
+                  {canManageWorkOrders && <button
                     className="danger-button"
                     onClick={() => deleteJob(activeJob.id)}
                   >
                     {t("deleteWorkOrder")}
-                  </button>
+                  </button>}
                   <button className="outline-button" onClick={closeModal}>
                     {t("done")}
                   </button>
@@ -1421,7 +1731,7 @@ export default function Home() {
               </div>
             </div>
           )}
-          {modal !== "detail" && modal && (
+          {modal !== "detail" && modal !== "history" && modal && (
             <div
               className="modal-backdrop"
               role="presentation"
@@ -1509,11 +1819,7 @@ export default function Home() {
                             updateForm("tech", event.target.value)
                           }
                         >
-                          <option value="Unassigned">Unassigned</option>
-                          <option>Marcus T.</option>
-                          <option>Jamie R.</option>
-                          <option>Devin L.</option>
-                          <option>Sam K.</option>
+                          {technicianOptions.map((tech) => <option key={tech} value={tech}>{tech}</option>)}
                         </select>
                       </label>
                       <label>
@@ -1556,14 +1862,16 @@ export default function Home() {
                       </label>
                       <label>
                         {t("clientName")}
-                        <input
+                        <select
                           required
                           value={form.client}
                           onChange={(event) =>
                             updateForm("client", event.target.value)
                           }
-                          placeholder="e.g. Summit Transport"
-                        />
+                        >
+                          <option value="">{language === "en" ? "Select a client" : "Sélectionner un client"}</option>
+                          {Array.from(new Set([...clientData, ...(form.client && !clientData.includes(form.client) ? [form.client] : [])])).map((client) => <option key={client} value={client}>{client}</option>)}
+                        </select>
                       </label>
                       <label>
                         {t("lastServiceDate")}

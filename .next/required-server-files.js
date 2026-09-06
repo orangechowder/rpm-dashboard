@@ -106,6 +106,9 @@ self.__SERVER_FILES_MANIFEST={
       }
     },
     "outputFileTracingRoot": "/Users/mac/Documents/rpm dash",
+    "allowedDevOrigins": [
+      "192.168.2.118"
+    ],
     "enablePrerenderSourceMaps": true,
     "cacheComponents": false,
     "cacheLife": {
