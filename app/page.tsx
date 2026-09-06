@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
+import { hasSupabaseConfig, loadFleetData, removeJob, removeUnit, saveJobs, saveUnits, subscribeToFleet, writeActivityLog } from "../lib/fleet-repository";
 
 type Section = "overview" | "jobs" | "units";
 type Language = "en" | "fr";
@@ -253,18 +254,12 @@ export default function Home() {
     quantity: "1",
     amount: "",
   });
-  const [unitData, setUnitData] = useState<Unit[]>(() =>
-    loadStored<Unit[]>("rpm-diesel-units", units).map((unit) => ({
-      ...unit,
-      usage: unit.usage ?? "Not recorded",
-    })),
-  );
-  const [jobData, setJobData] = useState<Job[]>(() =>
-    loadStored<Job[]>("rpm-diesel-jobs", jobs).map((job) => ({
-      ...job,
-      usage: job.usage ?? "Not recorded",
-    })),
-  );
+  const [unitData, setUnitData] = useState<Unit[]>(units);
+  const [jobData, setJobData] = useState<Job[]>(jobs);
+  const [cloudReady, setCloudReady] = useState(!hasSupabaseConfig);
+  const [cloudError, setCloudError] = useState<string | null>(null);
+  const remoteJobsUpdate = useRef(false);
+  const remoteUnitsUpdate = useRef(false);
   const t = (key: string) => translations[language][key] ?? key;
   const accounts = ["Andrée-Anne", "Marc", "Dannick"];
   const signIn = (event: React.FormEvent<HTMLFormElement>) => {
@@ -287,19 +282,43 @@ export default function Home() {
     window.localStorage.setItem("rpm-diesel-language", JSON.stringify(next));
   };
   useEffect(() => {
-    window.localStorage.setItem("rpm-diesel-jobs", JSON.stringify(jobData));
-    window.localStorage.setItem("rpm-diesel-units", JSON.stringify(unitData));
-    window.localStorage.setItem("rpm-diesel-data", JSON.stringify({ jobs: jobData, units: unitData }));
-  }, [jobData, unitData]);
+    let cancelled = false;
+    if (!hasSupabaseConfig) return;
+    loadFleetData().then((data) => {
+      if (cancelled) return;
+      if (data) {
+        remoteJobsUpdate.current = true;
+        remoteUnitsUpdate.current = true;
+        setJobData(data.jobs as Job[]);
+        setUnitData(data.units as Unit[]);
+      }
+      setCloudReady(true);
+    }).catch((error: Error) => {
+      setCloudError(error.message);
+      setCloudReady(true);
+    });
+    return () => { cancelled = true; };
+  }, []);
+  useEffect(() => {
+    if (!cloudReady || remoteJobsUpdate.current) {
+      remoteJobsUpdate.current = false;
+      return;
+    }
+    void saveJobs(jobData);
+  }, [jobData, cloudReady]);
+  useEffect(() => {
+    if (!cloudReady || remoteUnitsUpdate.current) {
+      remoteUnitsUpdate.current = false;
+      return;
+    }
+    void saveUnits(unitData);
+  }, [unitData, cloudReady]);
+  useEffect(() => {
+    if (!cloudReady || !hasSupabaseConfig) return;
+    return subscribeToFleet((nextUnits) => { remoteUnitsUpdate.current = true; setUnitData(nextUnits as Unit[]); }, (nextJobs) => { remoteJobsUpdate.current = true; setJobData(nextJobs as Job[]); }, (message) => setCloudError(message));
+  }, [cloudReady]);
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === "rpm-diesel-data" && event.newValue) {
-        try {
-          const shared = JSON.parse(event.newValue) as { jobs?: Job[]; units?: Unit[] };
-          if (shared.jobs) setJobData(shared.jobs.map((job) => ({ ...job, usage: job.usage ?? "Not recorded" })));
-          if (shared.units) setUnitData(shared.units.map((unit) => ({ ...unit, usage: unit.usage ?? "Not recorded" })));
-        } catch { /* Keep the current in-memory snapshot when another tab writes invalid data. */ }
-      }
       if (event.key === "rpm-diesel-session") setActiveUser(event.newValue ? JSON.parse(event.newValue) as string : null);
       if (event.key === "rpm-diesel-language" && event.newValue) setLanguage(JSON.parse(event.newValue) as Language);
     };
@@ -366,6 +385,7 @@ export default function Home() {
   const setStatus = (id: string, status: JobStatus) => {
     const job = jobData.find((item) => item.id === id);
     if (job) syncUnitFromJob(job, status);
+    if (job) void writeActivityLog(activeUser ?? "Unknown", "status_changed", "work_order", id, { status });
     setJobData((current) =>
       current.map((item) =>
         item.id === id ? { ...item, status, updated: "Just now" } : item,
@@ -552,11 +572,15 @@ export default function Home() {
   };
   const deleteJob = (id: string) => {
     setJobData((current) => current.filter((job) => job.id !== id));
+    void removeJob(id);
+    void writeActivityLog(activeUser ?? "Unknown", "deleted", "work_order", id);
     setModal(null);
     setDetailJobId(null);
   };
   const deleteUnit = (unitId: string) => {
     setUnitData((current) => current.filter((unit) => unit.unit !== unitId));
+    void removeUnit(unitId);
+    void writeActivityLog(activeUser ?? "Unknown", "deleted", "unit", unitId);
     setModal(null);
     setEditingUnitId(null);
   };
@@ -584,6 +608,7 @@ export default function Home() {
       };
       setJobData((current) => [newJob, ...current]);
       syncUnitFromJob(newJob, newJob.status, newJob.usage);
+      void writeActivityLog(activeUser ?? "Unknown", "created", "work_order", newJob.id, { unit: newJob.unit });
       setSection("jobs");
     }
     if (modal === "unit") {
@@ -604,6 +629,7 @@ export default function Home() {
             )
           : [newUnit, ...current],
       );
+      void writeActivityLog(activeUser ?? "Unknown", editingUnitId ? "updated" : "created", "unit", newUnit.unit);
       if (returnToJob) {
         setForm((current) => ({
           ...current,
@@ -668,6 +694,8 @@ export default function Home() {
           </div>
         </aside>
         <main className="main-content">
+          {!hasSupabaseConfig && <div className="cloud-banner cloud-warning">Cloud sync is not configured. Add `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` to `.env.local`.</div>}
+          {cloudError && <div className="cloud-banner cloud-error">Cloud sync error: {cloudError}</div>}
           <div className="mobile-nav">
             {navItems.map((item) => (
               <button
