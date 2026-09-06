@@ -16,3 +16,4 @@
 {"timestamp":"00:14:19.757","source":"Server","level":"LOG","message":"✓ Compiled in 277ms"}
 {"timestamp":"00:49:20.550","source":"Server","level":"LOG","message":"  Reload env: .env.local"}
 {"timestamp":"01:03:43.739","source":"Server","level":"LOG","message":"  Reload env: .env.local"}
+{"timestamp":"01:08:16.204","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
