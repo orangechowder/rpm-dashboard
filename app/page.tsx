@@ -260,6 +260,7 @@ export default function Home() {
   const [cloudError, setCloudError] = useState<string | null>(null);
   const remoteJobsUpdate = useRef(false);
   const remoteUnitsUpdate = useRef(false);
+  const cloudPollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const t = (key: string) => translations[language][key] ?? key;
   const accounts = ["Andrée-Anne", "Marc", "Dannick"];
   const signIn = (event: React.FormEvent<HTMLFormElement>) => {
@@ -339,7 +340,30 @@ export default function Home() {
         return existing ? current.map((job) => job.id === nextJob.id ? nextJob : job) : [nextJob, ...current];
       });
     };
-    return subscribeToFleet(applyUnitChange, applyJobChange, (message) => setCloudError(message));
+    const refreshFromCloud = () => {
+      void loadFleetData().then((data) => {
+        if (!data) return;
+        remoteJobsUpdate.current = true;
+        remoteUnitsUpdate.current = true;
+        setJobData(data.jobs as Job[]);
+        setUnitData(data.units as Unit[]);
+      }).catch((error: Error) => setCloudError(`Cloud polling error: ${error.message}`));
+    };
+    const unsubscribe = subscribeToFleet(applyUnitChange, applyJobChange, (message) => {
+      setCloudError("Realtime transport unavailable; cloud polling fallback is active.");
+      if (!cloudPollTimer.current) {
+        refreshFromCloud();
+        cloudPollTimer.current = setInterval(refreshFromCloud, 2500);
+      }
+      console.warn("Supabase realtime transport:", message);
+    });
+    return () => {
+      unsubscribe();
+      if (cloudPollTimer.current) {
+        clearInterval(cloudPollTimer.current);
+        cloudPollTimer.current = null;
+      }
+    };
   }, [cloudReady]);
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
@@ -719,7 +743,7 @@ export default function Home() {
         </aside>
         <main className="main-content">
           {!hasSupabaseConfig && <div className="cloud-banner cloud-warning">Cloud sync is not configured. Add `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` to `.env.local`.</div>}
-          {cloudError && <div className="cloud-banner cloud-error">Cloud sync error: {cloudError}</div>}
+          {cloudError && <div className="cloud-banner cloud-warning">{cloudError}</div>}
           <div className="mobile-nav">
             {navItems.map((item) => (
               <button
