@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
-import { hasSupabaseConfig, loadFleetData, removeJob, removeUnit, saveJobs, saveUnits, subscribeToFleet, writeActivityLog } from "../lib/fleet-repository";
+import { hasSupabaseConfig, loadFleetData, removeJob, removeUnit, saveJobs, saveUnits, subscribeToFleet, writeActivityLog, type RealtimeChange, type CloudJob, type CloudUnit } from "../lib/fleet-repository";
 
 type Section = "overview" | "jobs" | "units";
 type Language = "en" | "fr";
@@ -315,7 +315,31 @@ export default function Home() {
   }, [unitData, cloudReady]);
   useEffect(() => {
     if (!cloudReady || !hasSupabaseConfig) return;
-    return subscribeToFleet((nextUnits) => { remoteUnitsUpdate.current = true; setUnitData(nextUnits as Unit[]); }, (nextJobs) => { remoteJobsUpdate.current = true; setJobData(nextJobs as Job[]); }, (message) => setCloudError(message));
+    const applyUnitChange = (change: RealtimeChange<CloudUnit>) => {
+      remoteUnitsUpdate.current = true;
+      setUnitData((current) => {
+        const unitId = change.record?.unit ?? change.oldRecord?.unit;
+        if (!unitId) return current;
+        if (change.eventType === "DELETE") return current.filter((unit) => unit.unit !== unitId);
+        if (!change.record) return current;
+        const nextUnit = change.record as Unit;
+        const existing = current.some((unit) => unit.unit === nextUnit.unit);
+        return existing ? current.map((unit) => unit.unit === nextUnit.unit ? nextUnit : unit) : [nextUnit, ...current];
+      });
+    };
+    const applyJobChange = (change: RealtimeChange<CloudJob>) => {
+      remoteJobsUpdate.current = true;
+      setJobData((current) => {
+        const jobId = change.record?.id ?? change.oldRecord?.id;
+        if (!jobId) return current;
+        if (change.eventType === "DELETE") return current.filter((job) => job.id !== jobId);
+        if (!change.record) return current;
+        const nextJob = change.record as Job;
+        const existing = current.some((job) => job.id === nextJob.id);
+        return existing ? current.map((job) => job.id === nextJob.id ? nextJob : job) : [nextJob, ...current];
+      });
+    };
+    return subscribeToFleet(applyUnitChange, applyJobChange, (message) => setCloudError(message));
   }, [cloudReady]);
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {

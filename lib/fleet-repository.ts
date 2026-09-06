@@ -10,6 +10,15 @@ export type CloudJob = {
   status: "In Progress" | "Waiting on Parts" | "Waiting on Estimates" | "Completed";
   issue: string; updated: string; usage: string; notes?: unknown[]; lineItems?: unknown[];
 };
+export type RealtimeChange<T> = { eventType: "INSERT" | "UPDATE" | "DELETE"; record: T | null; oldRecord: Partial<T> | null };
+
+function mapUnit(row: Record<string, unknown>): CloudUnit {
+  return { unit: String(row.unit), vin: String(row.vin), client: String(row.client), type: String(row.type), service: String(row.service), due: String(row.due), overdue: Boolean(row.overdue), usage: String(row.usage) };
+}
+
+function mapJob(row: Record<string, unknown>): CloudJob {
+  return { id: String(row.id), unit: String(row.unit), client: String(row.client), tech: String(row.tech), priority: row.priority as CloudJob["priority"], status: row.status as CloudJob["status"], issue: String(row.issue), updated: String(row.updated), usage: String(row.usage), notes: Array.isArray(row.notes) ? row.notes : [], lineItems: Array.isArray(row.line_items) ? row.line_items : [] };
+}
 
 export async function loadFleetData() {
   if (!supabase) return null;
@@ -20,8 +29,8 @@ export async function loadFleetData() {
   if (unitError) throw unitError;
   if (jobError) throw jobError;
   return {
-    units: (unitRows ?? []).map((row) => ({ unit: row.unit, vin: row.vin, client: row.client, type: row.type, service: row.service, due: row.due, overdue: row.overdue, usage: row.usage } satisfies CloudUnit)),
-    jobs: (jobRows ?? []).map((row) => ({ id: row.id, unit: row.unit, client: row.client, tech: row.tech, priority: row.priority, status: row.status, issue: row.issue, updated: row.updated, usage: row.usage, notes: row.notes ?? [], lineItems: row.line_items ?? [] } satisfies CloudJob)),
+    units: (unitRows ?? []).map((row) => mapUnit(row as Record<string, unknown>)),
+    jobs: (jobRows ?? []).map((row) => mapJob(row as Record<string, unknown>)),
   };
 }
 
@@ -55,17 +64,15 @@ export async function writeActivityLog(actor: string, action: string, entityType
   if (error) throw error;
 }
 
-export function subscribeToFleet(onUnits: (units: CloudUnit[]) => void, onJobs: (jobs: CloudJob[]) => void, onError?: (message: string) => void) {
+export function subscribeToFleet(onUnits: (change: RealtimeChange<CloudUnit>) => void, onJobs: (change: RealtimeChange<CloudJob>) => void, onError?: (message: string) => void) {
   const client = supabase;
   if (!client) return () => undefined;
   const channel = client.channel("rpm-diesel-fleet");
-  channel.on("postgres_changes", { event: "*", schema: "public", table: "fleet_units" }, async () => {
-    const data = await loadFleetData();
-    if (data) onUnits(data.units);
+  channel.on("postgres_changes", { event: "*", schema: "public", table: "fleet_units" }, (payload) => {
+    onUnits({ eventType: payload.eventType as RealtimeChange<CloudUnit>["eventType"], record: payload.new && Object.keys(payload.new).length ? mapUnit(payload.new as Record<string, unknown>) : null, oldRecord: payload.old && Object.keys(payload.old).length ? mapUnit(payload.old as Record<string, unknown>) : null });
   });
-  channel.on("postgres_changes", { event: "*", schema: "public", table: "work_orders" }, async () => {
-    const data = await loadFleetData();
-    if (data) onJobs(data.jobs);
+  channel.on("postgres_changes", { event: "*", schema: "public", table: "work_orders" }, (payload) => {
+    onJobs({ eventType: payload.eventType as RealtimeChange<CloudJob>["eventType"], record: payload.new && Object.keys(payload.new).length ? mapJob(payload.new as Record<string, unknown>) : null, oldRecord: payload.old && Object.keys(payload.old).length ? mapJob(payload.old as Record<string, unknown>) : null });
   });
   channel.subscribe((status, error) => {
     if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") onError?.(error?.message ?? `Realtime channel ${status.toLowerCase()}`);
