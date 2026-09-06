@@ -704,6 +704,7 @@ export default function Home() {
     );
     setNoteText("");
   };
+  const canManageNote = (note?: Note) => canManageWorkOrders || note?.author === activeUser;
   const updateNote = (noteId: string, text: string) =>
     setJobData((current) =>
       current.map((job) =>
@@ -711,7 +712,7 @@ export default function Home() {
           ? {
               ...job,
               notes: (job.notes ?? []).map((note) =>
-                note.id === noteId ? { ...note, text } : note,
+                note.id === noteId && canManageNote(note) ? { ...note, text } : note,
               ),
             }
           : job,
@@ -723,7 +724,7 @@ export default function Home() {
         job.id === detailJobId
           ? {
               ...job,
-              notes: (job.notes ?? []).filter((note) => note.id !== noteId),
+              notes: (job.notes ?? []).filter((note) => note.id !== noteId || !canManageNote(note)),
             }
           : job,
       ),
@@ -1576,6 +1577,8 @@ export default function Home() {
                       <div className="note-item" key={note.id}>
                         <input
                           value={note.text}
+                          readOnly={!canManageNote(note)}
+                          className={!canManageNote(note) ? "note-read-only" : ""}
                           onChange={(event) =>
                             updateNote(note.id, event.target.value)
                           }
@@ -1584,12 +1587,12 @@ export default function Home() {
                           {note.author} ·{" "}
                           {new Date(note.createdAt).toLocaleString()}
                         </small>
-                        <button
+                        {canManageNote(note) && <button
                           className="entry-delete"
                           onClick={() => deleteNote(note.id)}
                         >
                           {t("delete")}
-                        </button>
+                        </button>}
                       </div>
                     ))}
                   </div>
