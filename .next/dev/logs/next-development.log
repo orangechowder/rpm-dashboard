@@ -410,3 +410,65 @@
 {"timestamp":"02:27:55.574","source":"Server","level":"LOG","message":"✓ Compiled in 233ms"}
 {"timestamp":"02:27:55.956","source":"Server","level":"LOG","message":"✓ Compiled in 0ms"}
 {"timestamp":"02:28:14.275","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"02:31:36.637","source":"Browser","level":"WARN","message":"Supabase realtime transport: socket closed: 1006"}
+{"timestamp":"02:31:36.654","source":"Browser","level":"WARN","message":"Supabase realtime transport: socket closed: 1006"}
+{"timestamp":"02:31:36.736","source":"Server","level":"WARN","message":"[browser] \"\\u001b[33mSupabase realtime transport:\\u001b[39m\" \"\\u001b[33msocket closed: 1006\\u001b[39m\" \"\\u001b[2m(app/page.tsx:531:190)\\u001b[22m\""}
+{"timestamp":"02:31:36.737","source":"Server","level":"WARN","message":"[browser] \"\\u001b[33mSupabase realtime transport:\\u001b[39m\" \"\\u001b[33msocket closed: 1006\\u001b[39m\" \"\\u001b[2m(app/page.tsx:531:190)\\u001b[22m\""}
+{"timestamp":"02:31:39.126","source":"Browser","level":"WARN","message":"Supabase realtime transport: socket closed: 1006"}
+{"timestamp":"02:31:39.156","source":"Server","level":"WARN","message":"[browser] \"\\u001b[33mSupabase realtime transport:\\u001b[39m\" \"\\u001b[33msocket closed: 1006\\u001b[39m\" \"\\u001b[2m(app/page.tsx:537:15)\\u001b[22m\""}
+{"timestamp":"09:39:10.425","source":"Server","level":"LOG","message":"✓ Compiled in 886ms"}
+{"timestamp":"09:39:41.044","source":"Server","level":"LOG","message":"✓ Compiled in 443ms"}
+{"timestamp":"09:41:22.182","source":"Server","level":"LOG","message":"✓ Compiled in 250ms"}
+{"timestamp":"09:44:39.241","source":"Server","level":"LOG","message":"✓ Compiled in 300ms"}
+{"timestamp":"09:45:03.836","source":"Server","level":"LOG","message":"✓ Compiled in 260ms"}
+{"timestamp":"09:45:08.044","source":"Server","level":"LOG","message":"✓ Compiled in 134ms"}
+{"timestamp":"09:48:05.324","source":"Server","level":"LOG","message":"✓ Compiled in 250ms"}
+{"timestamp":"09:50:53.951","source":"Server","level":"LOG","message":"✓ Compiled in 447ms"}
+{"timestamp":"09:53:30.096","source":"Server","level":"LOG","message":"✓ Compiled in 273ms"}
+{"timestamp":"09:53:35.863","source":"Server","level":"LOG","message":"✓ Compiled in 319ms"}
+{"timestamp":"09:54:43.368","source":"Server","level":"LOG","message":"✓ Compiled in 301ms"}
+{"timestamp":"09:58:13.591","source":"Server","level":"LOG","message":"✓ Compiled in 400ms"}
+{"timestamp":"09:58:22.704","source":"Server","level":"LOG","message":"✓ Compiled in 221ms"}
+{"timestamp":"09:58:39.612","source":"Server","level":"LOG","message":"✓ Compiled in 180ms"}
+{"timestamp":"10:01:29.291","source":"Server","level":"LOG","message":"✓ Compiled in 288ms"}
+{"timestamp":"10:01:34.056","source":"Server","level":"LOG","message":"✓ Compiled in 175ms"}
+{"timestamp":"10:01:34.318","source":"Server","level":"LOG","message":"✓ Compiled in 0ms"}
+{"timestamp":"10:03:47.732","source":"Server","level":"LOG","message":"✓ Compiled in 312ms"}
+{"timestamp":"10:03:50.337","source":"Server","level":"LOG","message":"✓ Compiled in 295ms"}
+{"timestamp":"10:03:52.556","source":"Server","level":"LOG","message":"✓ Compiled in 243ms"}
+{"timestamp":"10:07:18.982","source":"Server","level":"LOG","message":"✓ Compiled in 500ms"}
+{"timestamp":"10:07:19.075","source":"Browser","level":"ERROR","message":"./app/page.tsx:187:60\nError: Expected ';', '}' or <eof>\n  185 | ...ndefined\") return fallback;\n  186 | ...\n> 187 | ...shboard Overview\", activeJobQueue: \"Active Job Queue\", unitManagem...\n      |                                     ^\n  188 | ...parse(stored) as T) : fallback;\n  189 | ...RS\", activeJobs: \"Active Jobs\", totalInProgress: \"Total in progres...\n  190 | ...\n\nParsing ecmascript source code failed\n\nImport traces:\n  Client Component Browser:\n    ./app/page.tsx [Client Component Browser]\n    ./app/page.tsx [Server Component]\n\n  Client Component SSR:\n    ./app/page.tsx [Client Component SSR]\n    ./app/page.tsx [Server Component] "}
+{"timestamp":"10:07:19.078","source":"Server","level":"ERROR","message":"[browser] \"./app/page.tsx:187:60\\nError: Expected ';', '}' or <eof>\\n  185 | ...ndefined\\\") return fallback;\\n  186 | ...\\n> 187 | ...shboard Overview\\\", activeJobQueue: \\\"Active Job Queue\\\", unitManagem...\\n      |                                     ^\\n  188 | ...parse(stored) as T) : fallback;\\n  189 | ...RS\\\", activeJobs: \\\"Active Jobs\\\", totalInProgress: \\\"Total in progres...\\n  190 | ...\\n\\nParsing ecmascript source code failed\\n\\nImport traces:\\n  Client Component Browser:\\n    ./app/page.tsx [Client Component Browser]\\n    ./app/page.tsx [Server Component]\\n\\n  Client Component SSR:\\n    ./app/page.tsx [Client Component SSR]\\n    ./app/page.tsx [Server Component]\" \"\""}
+{"timestamp":"10:08:23.830","source":"Server","level":"LOG","message":"✓ Compiled in 321ms"}
+{"timestamp":"10:08:23.940","source":"Browser","level":"ERROR","message":"./app/page.tsx:187:60\nError: Expected ';', '}' or <eof>\n  185 | ...ndefined\") return fallback;\n  186 | ...\n> 187 | ...shboard Overview\", activeJobQueue: \"Active Job Queue\", unitManagem...\n      |                                     ^\n  188 | ...parse(stored) as T) : fallback;\n  189 | ...RS\", activeJobs: \"Active Jobs\", totalInProgress: \"Total in progres...\n  190 | ...\n\nParsing ecmascript source code failed\n\nImport traces:\n  Client Component Browser:\n    ./app/page.tsx [Client Component Browser]\n    ./app/page.tsx [Server Component]\n\n  Client Component SSR:\n    ./app/page.tsx [Client Component SSR]\n    ./app/page.tsx [Server Component] "}
+{"timestamp":"10:08:23.941","source":"Server","level":"ERROR","message":"[browser] \"./app/page.tsx:187:60\\nError: Expected ';', '}' or <eof>\\n  185 | ...ndefined\\\") return fallback;\\n  186 | ...\\n> 187 | ...shboard Overview\\\", activeJobQueue: \\\"Active Job Queue\\\", unitManagem...\\n      |                                     ^\\n  188 | ...parse(stored) as T) : fallback;\\n  189 | ...RS\\\", activeJobs: \\\"Active Jobs\\\", totalInProgress: \\\"Total in progres...\\n  190 | ...\\n\\nParsing ecmascript source code failed\\n\\nImport traces:\\n  Client Component Browser:\\n    ./app/page.tsx [Client Component Browser]\\n    ./app/page.tsx [Server Component]\\n\\n  Client Component SSR:\\n    ./app/page.tsx [Client Component SSR]\\n    ./app/page.tsx [Server Component]\" \"\""}
+{"timestamp":"10:10:02.475","source":"Server","level":"LOG","message":"✓ Compiled in 269ms"}
+{"timestamp":"10:12:45.749","source":"Server","level":"LOG","message":"✓ Compiled in 206ms"}
+{"timestamp":"10:13:43.692","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"10:13:51.953","source":"Server","level":"LOG","message":"✓ Compiled in 283ms"}
+{"timestamp":"10:14:50.361","source":"Server","level":"LOG","message":"✓ Compiled in 181ms"}
+{"timestamp":"10:16:18.658","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"10:30:50.307","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"10:47:18.535","source":"Server","level":"LOG","message":"✓ Compiled in 424ms"}
+{"timestamp":"10:48:22.568","source":"Server","level":"LOG","message":"✓ Compiled in 253ms"}
+{"timestamp":"10:49:26.235","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"10:50:06.815","source":"Server","level":"LOG","message":"✓ Compiled in 203ms"}
+{"timestamp":"10:50:51.937","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"10:51:18.687","source":"Server","level":"LOG","message":"✓ Compiled in 177ms"}
+{"timestamp":"10:51:45.553","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"10:52:39.378","source":"Server","level":"LOG","message":"✓ Compiled in 201ms"}
+{"timestamp":"10:53:42.185","source":"Server","level":"LOG","message":"✓ Compiled in 307ms"}
+{"timestamp":"10:53:48.187","source":"Server","level":"LOG","message":"✓ Compiled in 230ms"}
+{"timestamp":"10:53:48.502","source":"Server","level":"LOG","message":"✓ Compiled in 0ms"}
+{"timestamp":"10:56:05.999","source":"Server","level":"LOG","message":"✓ Compiled in 216ms"}
+{"timestamp":"10:56:09.878","source":"Server","level":"LOG","message":"✓ Compiled in 428ms"}
+{"timestamp":"10:56:10.113","source":"Server","level":"LOG","message":"✓ Compiled in 0ms"}
+{"timestamp":"10:56:15.726","source":"Server","level":"LOG","message":"✓ Compiled in 158ms"}
+{"timestamp":"10:56:24.648","source":"Server","level":"LOG","message":"✓ Compiled in 162ms"}
+{"timestamp":"10:56:29.719","source":"Server","level":"LOG","message":"✓ Compiled in 147ms"}
+{"timestamp":"10:56:47.193","source":"Server","level":"LOG","message":"✓ Compiled in 156ms"}
+{"timestamp":"10:57:05.240","source":"Server","level":"LOG","message":"✓ Compiled in 246ms"}
+{"timestamp":"10:57:10.973","source":"Server","level":"LOG","message":"✓ Compiled in 209ms"}
+{"timestamp":"10:57:28.083","source":"Server","level":"LOG","message":"✓ Compiled in 143ms"}
+{"timestamp":"10:57:31.230","source":"Server","level":"LOG","message":"✓ Compiled in 227ms"}
+{"timestamp":"10:58:05.959","source":"Server","level":"LOG","message":"✓ Compiled in 252ms"}

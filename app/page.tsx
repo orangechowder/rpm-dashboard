@@ -168,15 +168,15 @@ const defaultUsers: UserAccount[] = [
 
 const translations: Record<Language, Record<string, string>> = {
   en: {
-    dashboardOverview: "Dashboard Overview", activeJobQueue: "Active Job Queue", unitManagement: "Unit Management", clientManagement: "Client Management", punchClock: "Punch Clock", punchSubtitle: "Track your working time and connect it to a work order.", userManagement: "User Management", usersSubtitle: "Manage dashboard access, roles, and active profiles.", clientsSubtitle: "Browse and manage every fleet client.", workspace: "WORKSPACE",
+    dashboardOverview: "Dashboard Overview", activeJobQueue: "Active Job Queue", unitManagement: "Unit Management", clientManagement: "Client Management", punchClock: "Punch Clock", punchSubtitle: "Track your working time and connect it to a work order.", userManagement: "User Management", usersSubtitle: "Manage dashboard access, roles, and active profiles.", clientsSubtitle: "Browse and manage every fleet client.", workspace: "WORKSPACE", partsOnly: "Parts only", total: "Total", amountPerItem: "$ / item", section: "Section", chooseSection: "Choose section", entries: "entries", items: "items", clients: "clients", history: "History", edit: "Edit", save: "Save", searchClients: "Search clients...", newClientName: "New client name", addClient: "Add client", fleetClient: "Fleet client", allFleetRecords: "All fleet records up to date", unitsOverduePm: "Units overdue for PM", requiresAttention: "Requires immediate attention", assignedClientLabel: "ASSIGNED CLIENT", lastServiceLabel: "LAST SERVICE", lastUsageLabel: "LAST SERVICE USAGE", describeIssue: "Describe the issue", usageExample: "e.g. 184220 KM or 4280 Hrs", unitExample: "e.g. TRK-506", vinExample: "17-character VIN", typeExample: "e.g. Volvo VNL", cloudNotConfigured: "Cloud sync is not configured. Add your Supabase environment variables to .env.local.", exportReady: "Work orders exported", serviceHistory: "SERVICE HISTORY", completedWorkOrders: "Completed work orders", cloudTimeMissing: "Punch Clock is not installed in Supabase yet. Run the database schema first.", fleetRecordsDetail: "Fleet inventory",
     goodMorning: "Good morning", overviewSubtitle: "Here's what's happening across your fleet today.", jobsSubtitle: "Monitor and coordinate every active service request.", unitsSubtitle: "Keep your fleet records current and service-ready.", systemOperational: "System operational", lastSynced: "Last synced just now", emergency: "Emergency", reviewUnits: "Review units →",
-    workOrders: "WORK ORDERS", activeJobs: "Active Jobs", totalInProgress: "Total in progress", waitingParts: "Waiting on parts", waitingEstimates: "Waiting on estimates", fleetHealth: "FLEET HEALTH", unitStatus: "Unit Status", totalUnits: "Total units repertoried", fleetRecords: "All fleet records up to date", pmCompliance: "PM compliance", overduePm: "units overdue for PM", fieldOperations: "FIELD OPERATIONS", fieldService: "Field Service", techsOnRoad: "Technicians on road", unassignedCalls: "Unassigned calls", responseTime: "Avg response time", recentActivity: "RECENT ACTIVITY", latestUpdates: "Latest updates", viewAll: "View all →", quickActions: "QUICK ACTIONS", quickQuestion: "What would you like to do?", createWorkOrder: "Create work order", startService: "Start a new service request", addUnit: "Add a unit", registerAsset: "Register a vehicle or asset", serviceOperations: "SERVICE OPERATIONS", workOrderQueue: "Work order queue", newWorkOrder: "+ New work order", export: "Export ↓", assetDatabase: "ASSET DATABASE", fleetDirectory: "Fleet directory", addNewUnit: "+ Add unit", filters: "Filters ≡", assignedClient: "ASSIGNED CLIENT", lastService: "LAST SERVICE", lastUsage: "LAST SERVICE USAGE", pmNeeded: "PM needed", pmClear: "PM clear", workOrder: "Work order", unitClient: "Unit / client", technician: "Technician", priority: "Priority", status: "Status", updated: "Updated", fleetUnit: "Fleet unit", selectUnit: "Select a unit from the repertory", addNewUnitOption: "+ Add New Unit to Repertory", serviceRequest: "Service request", lastServiceUsage: "Last service mileage / hours", unitNumber: "Unit number", vin: "VIN", clientName: "Client name", lastServiceDate: "Last service", unitType: "Unit type", saveUnit: "Save unit", cancel: "Cancel", deleteUnit: "Delete unit", close: "Close modal", workOrderDetails: "WORK ORDER", notes: "Technician notes", addNotePlaceholder: "Add a timestamped note...", addNote: "Add note", parts: "Labor & parts", description: "Description", amount: "Amount", add: "Add", delete: "Delete", deleteWorkOrder: "Delete work order", done: "Done", createTitle: "Create work order", addUnitTitle: "Add fleet unit", editUnitTitle: "Edit fleet unit", addToRepertory: "Add unit to repertory", part: "Part", labor: "Labor", loginTitle: "RPM Diesel Dashboard", loginSubtitle: "Sign in to manage fleet operations", name: "Name", password: "Password", signIn: "Sign in", invalidLogin: "Enter a valid name and password.", signedInAs: "Signed in as", signOut: "Sign out", language: "Switch language",
+    workOrders: "WORK ORDERS", activeJobs: "Active Jobs", totalInProgress: "Total in progress", waitingParts: "Waiting on parts", waitingEstimates: "Waiting on estimates", fleetHealth: "FLEET HEALTH", unitStatus: "Unit Status", totalUnits: "Total units repertoried", fleetRecords: "All fleet records up to date", pmCompliance: "PM compliance", overduePm: "units overdue for PM", fieldOperations: "FIELD OPERATIONS", fieldService: "Field Service", techsOnRoad: "Technicians on road", unassignedCalls: "Unassigned calls", responseTime: "Avg response time", recentActivity: "RECENT ACTIVITY", latestUpdates: "Latest updates", viewAll: "View all →", quickActions: "QUICK ACTIONS", quickQuestion: "What would you like to do?", createWorkOrder: "Create work order", startService: "Start a new service request", addUnit: "Add a unit", registerAsset: "Register a vehicle or asset", serviceOperations: "SERVICE OPERATIONS", workOrderQueue: "Work order queue", newWorkOrder: "+ New work order", export: "Export ↓", assetDatabase: "ASSET DATABASE", fleetDirectory: "Fleet directory", addNewUnit: "+ Add unit", filters: "Filters ≡", assignedClient: "ASSIGNED CLIENT", lastService: "LAST SERVICE", lastUsage: "LAST SERVICE USAGE", pmNeeded: "PM needed", pmClear: "PM clear", workOrder: "Work order", unitClient: "Unit / client", technician: "Technician", priority: "Priority", status: "Status", updated: "Updated", fleetUnit: "Fleet unit", selectUnit: "Select a unit from the repertory", addNewUnitOption: "+ Add New Unit to Repertory", serviceRequest: "Service request", lastServiceUsage: "Last service mileage / hours", unitNumber: "Unit number", vin: "VIN", clientName: "Client name", lastServiceDate: "Last service", unitType: "Unit type", saveUnit: "Save unit", cancel: "Cancel", deleteUnit: "Delete unit", close: "Close modal", workOrderDetails: "WORK ORDER", notes: "Technician notes", addNotePlaceholder: "Add a timestamped note...", addNote: "Add note", parts: "Parts", description: "Description", amount: "Amount", add: "Add", delete: "Delete", deleteWorkOrder: "Delete work order", done: "Done", createTitle: "Create work order", addUnitTitle: "Add fleet unit", editUnitTitle: "Edit fleet unit", addToRepertory: "Add unit to repertory", part: "Part", labor: "Labor", loginTitle: "RPM Diesel Dashboard", loginSubtitle: "Sign in to manage fleet operations", name: "Name", password: "Password", signIn: "Sign in", invalidLogin: "Enter a valid name and password.", signedInAs: "Signed in as", signOut: "Sign out", language: "Switch language",
     userDirectory: "USER DIRECTORY", manageProfiles: "Manage dashboard access and roles", addTechnician: "+ Add technician", role: "Role", active: "Active", disabled: "Disabled", admin: "Admin", removeUser: "Remove user", changePassword: "Change password", adminChangePassword: "Set password", currentPassword: "Current password", newPassword: "New password", confirmPassword: "Confirm new password", updatePassword: "Update password", technicianList: "Technician list", punchHistory: "Punch history", punchedBy: "Punched by", clockIn: "Clock in", clockOut: "Clock out", totalHours: "Total hours", totalWorked: "Total worked hours", activePunch: "Active", noPunches: "No punches recorded yet.", noData: "—", "In Progress": "In Progress", "Waiting on Parts": "Waiting on Parts", "Waiting on Estimates": "Waiting on Estimates", Completed: "Completed", High: "High", Normal: "Normal", Low: "Low",
   },
   fr: {
-    dashboardOverview: "Vue d'ensemble", activeJobQueue: "File des travaux actifs", unitManagement: "Gestion des unités", clientManagement: "Gestion des clients", punchClock: "Poinçonneuse", punchSubtitle: "Suivez votre temps de travail et associez-le à un ordre de travail.", userManagement: "Gestion des utilisateurs", usersSubtitle: "Gérez les accès, les rôles et les profils actifs.", clientsSubtitle: "Consultez et gérez tous les clients de la flotte.", workspace: "ESPACE DE TRAVAIL",
+    dashboardOverview: "Vue d'ensemble", activeJobQueue: "File des travaux actifs", unitManagement: "Gestion des unités", clientManagement: "Gestion des clients", punchClock: "Poinçonneuse", punchSubtitle: "Suivez votre temps de travail et associez-le à un ordre de travail.", userManagement: "Gestion des utilisateurs", usersSubtitle: "Gérez les accès, les rôles et les profils actifs.", clientsSubtitle: "Consultez et gérez tous les clients de la flotte.", workspace: "ESPACE DE TRAVAIL", partsOnly: "Pièces seulement", total: "Total", amountPerItem: "$ / pièce", section: "Section", chooseSection: "Choisir une section", entries: "entrées", items: "articles", clients: "clients", history: "Historique", edit: "Modifier", save: "Enregistrer", searchClients: "Rechercher des clients...", newClientName: "Nom du nouveau client", addClient: "Ajouter le client", fleetClient: "Client de flotte", allFleetRecords: "Tous les dossiers de flotte sont à jour", unitsOverduePm: "Unités en retard de PM", requiresAttention: "Attention immédiate requise", assignedClientLabel: "CLIENT ASSIGNÉ", lastServiceLabel: "DERNIER SERVICE", lastUsageLabel: "DERNIÈRE UTILISATION", describeIssue: "Décrire le problème", usageExample: "ex. 184220 KM ou 4280 Hrs", unitExample: "ex. TRK-506", vinExample: "NIV de 17 caractères", typeExample: "ex. Volvo VNL", cloudNotConfigured: "La synchronisation infonuagique n'est pas configurée. Ajoutez vos variables Supabase dans .env.local.", exportReady: "Ordres de travail exportés", serviceHistory: "HISTORIQUE DE SERVICE", completedWorkOrders: "Ordres de travail complétés", cloudTimeMissing: "La poinçonneuse n'est pas encore installée dans Supabase. Exécutez d'abord le schéma de base de données.", fleetRecordsDetail: "Inventaire de la flotte",
     goodMorning: "Bonjour", overviewSubtitle: "Voici ce qui se passe dans votre flotte aujourd'hui.", jobsSubtitle: "Surveillez et coordonnez chaque demande de service active.", unitsSubtitle: "Gardez les dossiers de votre flotte à jour et prête pour le service.", systemOperational: "Système opérationnel", lastSynced: "Synchronisé à l'instant", emergency: "Urgence", reviewUnits: "Réviser les unités →",
-    workOrders: "ORDRES DE TRAVAIL", activeJobs: "Travaux actifs", totalInProgress: "Total en cours", waitingParts: "En attente de pièces", waitingEstimates: "En attente d'estimations", fleetHealth: "ÉTAT DE LA FLOTTE", unitStatus: "État des unités", totalUnits: "Total des unités répertoriées", fleetRecords: "Tous les dossiers sont à jour", pmCompliance: "Conformité PM", overduePm: "unités en retard de PM", fieldOperations: "OPÉRATIONS TERRAIN", fieldService: "Service sur le terrain", techsOnRoad: "Techniciens sur la route", unassignedCalls: "Appels non assignés", responseTime: "Temps de réponse moyen", recentActivity: "ACTIVITÉ RÉCENTE", latestUpdates: "Dernières mises à jour", viewAll: "Voir tout →", quickActions: "ACTIONS RAPIDES", quickQuestion: "Que voulez-vous faire?", createWorkOrder: "Créer un ordre de travail", startService: "Démarrer une demande de service", addUnit: "Ajouter une unité", registerAsset: "Enregistrer un véhicule ou un actif", serviceOperations: "OPÉRATIONS DE SERVICE", workOrderQueue: "File des ordres de travail", newWorkOrder: "+ Nouvel ordre de travail", export: "Exporter ↓", assetDatabase: "BASE DES ACTIFS", fleetDirectory: "Répertoire de la flotte", addNewUnit: "+ Ajouter une unité", filters: "Filtres ≡", assignedClient: "CLIENT ASSIGNÉ", lastService: "DERNIER SERVICE", lastUsage: "DERNIÈRE UTILISATION", pmNeeded: "PM requis", pmClear: "PM à jour", workOrder: "Ordre de travail", unitClient: "Unité / client", technician: "Technicien", priority: "Priorité", status: "Statut", updated: "Mis à jour", fleetUnit: "Unité de la flotte", selectUnit: "Sélectionner une unité du répertoire", addNewUnitOption: "+ Ajouter une unité au répertoire", serviceRequest: "Demande de service", lastServiceUsage: "Kilométrage / heures depuis le dernier service", unitNumber: "Numéro d'unité", vin: "NIV", clientName: "Nom du client", lastServiceDate: "Dernier service", unitType: "Type d'unité", saveUnit: "Enregistrer l'unité", cancel: "Annuler", deleteUnit: "Supprimer l'unité", close: "Fermer la fenêtre", workOrderDetails: "ORDRE DE TRAVAIL", notes: "Notes du technicien", addNotePlaceholder: "Ajouter une note horodatée...", addNote: "Ajouter la note", parts: "Main-d'œuvre et pièces", description: "Description", amount: "Montant", add: "Ajouter", delete: "Supprimer", deleteWorkOrder: "Supprimer l'ordre de travail", done: "Terminé", createTitle: "Créer un ordre de travail", addUnitTitle: "Ajouter une unité", editUnitTitle: "Modifier l'unité", addToRepertory: "Ajouter au répertoire", part: "Pièce", labor: "Main-d'œuvre", loginTitle: "Tableau de bord RPM Diesel", loginSubtitle: "Connectez-vous pour gérer les opérations de flotte", name: "Nom", password: "Mot de passe", signIn: "Se connecter", invalidLogin: "Entrez un nom et un mot de passe valides.", signedInAs: "Session de", signOut: "Se déconnecter", language: "Changer de langue",
+    workOrders: "ORDRES DE TRAVAIL", activeJobs: "Travaux actifs", totalInProgress: "Total en cours", waitingParts: "En attente de pièces", waitingEstimates: "En attente d'estimations", fleetHealth: "ÉTAT DE LA FLOTTE", unitStatus: "État des unités", totalUnits: "Total des unités répertoriées", fleetRecords: "Tous les dossiers sont à jour", pmCompliance: "Conformité PM", overduePm: "unités en retard de PM", fieldOperations: "OPÉRATIONS TERRAIN", fieldService: "Service sur le terrain", techsOnRoad: "Techniciens sur la route", unassignedCalls: "Appels non assignés", responseTime: "Temps de réponse moyen", recentActivity: "ACTIVITÉ RÉCENTE", latestUpdates: "Dernières mises à jour", viewAll: "Voir tout →", quickActions: "ACTIONS RAPIDES", quickQuestion: "Que voulez-vous faire?", createWorkOrder: "Créer un ordre de travail", startService: "Démarrer une demande de service", addUnit: "Ajouter une unité", registerAsset: "Enregistrer un véhicule ou un actif", serviceOperations: "OPÉRATIONS DE SERVICE", workOrderQueue: "File des ordres de travail", newWorkOrder: "+ Nouvel ordre de travail", export: "Exporter ↓", assetDatabase: "BASE DES ACTIFS", fleetDirectory: "Répertoire de la flotte", addNewUnit: "+ Ajouter une unité", filters: "Filtres ≡", assignedClient: "CLIENT ASSIGNÉ", lastService: "DERNIER SERVICE", lastUsage: "DERNIÈRE UTILISATION", pmNeeded: "PM requis", pmClear: "PM à jour", workOrder: "Ordre de travail", unitClient: "Unité / client", technician: "Technicien", priority: "Priorité", status: "Statut", updated: "Mis à jour", fleetUnit: "Unité de la flotte", selectUnit: "Sélectionner une unité du répertoire", addNewUnitOption: "+ Ajouter une unité au répertoire", serviceRequest: "Demande de service", lastServiceUsage: "Kilométrage / heures depuis le dernier service", unitNumber: "Numéro d'unité", vin: "NIV", clientName: "Nom du client", lastServiceDate: "Dernier service", unitType: "Type d'unité", saveUnit: "Enregistrer l'unité", cancel: "Annuler", deleteUnit: "Supprimer l'unité", close: "Fermer la fenêtre", workOrderDetails: "ORDRE DE TRAVAIL", notes: "Notes du technicien", addNotePlaceholder: "Ajouter une note horodatée...", addNote: "Ajouter la note", parts: "Pièces", description: "Description", amount: "Montant", add: "Ajouter", delete: "Supprimer", deleteWorkOrder: "Supprimer l'ordre de travail", done: "Terminé", createTitle: "Créer un ordre de travail", addUnitTitle: "Ajouter une unité", editUnitTitle: "Modifier l'unité", addToRepertory: "Ajouter au répertoire", part: "Pièce", labor: "Main-d'œuvre", loginTitle: "Tableau de bord RPM Diesel", loginSubtitle: "Connectez-vous pour gérer les opérations de flotte", name: "Nom", password: "Mot de passe", signIn: "Se connecter", invalidLogin: "Entrez un nom et un mot de passe valides.", signedInAs: "Session de", signOut: "Se déconnecter", language: "Changer de langue",
     userDirectory: "RÉPERTOIRE DES UTILISATEURS", manageProfiles: "Gérez les accès et les rôles du tableau de bord", addTechnician: "+ Ajouter un technicien", role: "Rôle", active: "Actif", disabled: "Désactivé", admin: "Administrateur", removeUser: "Supprimer l'utilisateur", changePassword: "Changer le mot de passe", adminChangePassword: "Définir le mot de passe", currentPassword: "Mot de passe actuel", newPassword: "Nouveau mot de passe", confirmPassword: "Confirmer le nouveau mot de passe", updatePassword: "Mettre à jour le mot de passe", technicianList: "Liste des techniciens", punchHistory: "Historique des poinçons", punchedBy: "Pointé par", clockIn: "Début", clockOut: "Fin", totalHours: "Heures totales", totalWorked: "Heures travaillées totales", activePunch: "Actif", noPunches: "Aucun poinçon enregistré.", noData: "—", "In Progress": "En cours", "Waiting on Parts": "En attente de pièces", "Waiting on Estimates": "En attente d'estimations", Completed: "Terminé", High: "Élevée", Normal: "Normale", Low: "Faible",
   },
 };
@@ -184,6 +184,12 @@ const translations: Record<Language, Record<string, string>> = {
 function loadStored<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
   try {
+    /*
+    dashboardOverview: "Dashboard Overview", activeJobQueue: "Active Job Queue", unitManagement: "Unit Management", clientManagement: "Client Management", punchClock: "Punch Clock", punchSubtitle: "Track your working time and connect it to a work order.", userManagement: "User Management", usersSubtitle: "Manage dashboard access, roles, and active profiles.", clientsSubtitle: "Browse and manage every fleet client.", workspace: "WORKSPACE", partsOnly: "Parts only", total: "Total",
+    return stored ? (JSON.parse(stored) as T) : fallback;
+    workOrders: "WORK ORDERS", activeJobs: "Active Jobs", totalInProgress: "Total in progress", waitingParts: "Waiting on parts", waitingEstimates: "Waiting on estimates", fleetHealth: "FLEET HEALTH", unitStatus: "Unit Status", totalUnits: "Total units repertoried", fleetRecords: "All fleet records up to date", pmCompliance: "PM compliance", overduePm: "units overdue for PM", fieldOperations: "FIELD OPERATIONS", fieldService: "Field Service", techsOnRoad: "Technicians on road", unassignedCalls: "Unassigned calls", responseTime: "Avg response time", recentActivity: "RECENT ACTIVITY", latestUpdates: "Latest updates", viewAll: "View all →", quickActions: "QUICK ACTIONS", quickQuestion: "What would you like to do?", createWorkOrder: "Create work order", startService: "Start a new service request", addUnit: "Add a unit", registerAsset: "Register a vehicle or asset", serviceOperations: "SERVICE OPERATIONS", workOrderQueue: "Work order queue", newWorkOrder: "+ New work order", export: "Export ↓", assetDatabase: "ASSET DATABASE", fleetDirectory: "Fleet directory", addNewUnit: "+ Add unit", filters: "Filters ≡", assignedClient: "ASSIGNED CLIENT", lastService: "LAST SERVICE", lastUsage: "LAST SERVICE USAGE", pmNeeded: "PM needed", pmClear: "PM clear", workOrder: "Work order", unitClient: "Unit / client", technician: "Technician", priority: "Priority", status: "Status", updated: "Updated", fleetUnit: "Fleet unit", selectUnit: "Select a unit from the repertory", addNewUnitOption: "+ Add New Unit to Repertory", serviceRequest: "Service request", lastServiceUsage: "Last service mileage / hours", unitNumber: "Unit number", vin: "VIN", clientName: "Client name", lastServiceDate: "Last service", unitType: "Unit type", saveUnit: "Save unit", cancel: "Cancel", deleteUnit: "Delete unit", close: "Close modal", workOrderDetails: "WORK ORDER", notes: "Technician notes", addNotePlaceholder: "Add a timestamped note...", addNote: "Add note", parts: "Labor & parts", description: "Description", amount: "Amount", add: "Add", delete: "Delete", deleteWorkOrder: "Delete work order", done: "Done", createTitle: "Create work order", addUnitTitle: "Add fleet unit", editUnitTitle: "Edit fleet unit", addToRepertory: "Add unit to repertory", part: "Part", labor: "Labor", loginTitle: "RPM Diesel Dashboard", loginSubtitle: "Sign in to manage fleet operations", name: "Name", password: "Password", signIn: "Sign in", invalidLogin: "Enter a valid name and password.", signedInAs: "Signed in as", signOut: "Sign out", language: "Switch language",
+    return fallback;
+    */
     const stored = window.localStorage.getItem(key);
     return stored ? (JSON.parse(stored) as T) : fallback;
   } catch {
@@ -301,7 +307,7 @@ export default function Home() {
   });
   const [noteText, setNoteText] = useState("");
   const [lineItem, setLineItem] = useState({
-    kind: "Labor" as LineItem["kind"],
+    kind: "Part" as LineItem["kind"],
     description: "",
     quantity: "1",
     amount: "",
@@ -320,6 +326,21 @@ export default function Home() {
   const cloudPollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const cloudRefreshInFlight = useRef(false);
   const t = (key: string) => translations[language][key] ?? key;
+  const todayLabel = new Intl.DateTimeFormat(language === "fr" ? "fr-CA" : "en-CA", { dateStyle: "medium" }).format(new Date());
+  const formatCurrency = (amount: number) => new Intl.NumberFormat(language === "fr" ? "fr-CA" : "en-CA", {
+    style: "currency",
+    currency: "CAD",
+  }).format(amount);
+  const exportJobs = () => {
+    const headers = [t("workOrder"), t("unitClient"), t("technician"), t("priority"), t("status"), t("updated")];
+    const rows = filteredJobs.map((job) => [job.id, `${job.unit} - ${job.client}`, job.tech, t(job.priority), t(job.status), job.updated]);
+    const csv = [headers, ...rows].map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(",")).join("\n");
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    link.download = `rpm-work-orders-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  };
   const greeting = new Date().getHours() < 12
     ? language === "en" ? "Good morning" : "Bonjour"
     : language === "en" ? "Good afternoon" : "Bon après-midi";
@@ -334,6 +355,8 @@ export default function Home() {
     if (account) {
       setActiveUser(account.name);
       setLoginError(false);
+      setProfileMenuOpen(false);
+      setPasswordEditorOpen(false);
       window.localStorage.setItem("rpm-diesel-session", JSON.stringify(account));
     } else {
       setLoginError(true);
@@ -354,7 +377,7 @@ export default function Home() {
     try {
       const created = await createTimeEntry({ userId: activeUser, userName: activeUser, workOrderId, clockIn: new Date().toISOString() });
       if (created) setTimeEntries((current) => [created, ...current]);
-      else setCloudError("Punch Clock is not installed in Supabase yet. Run supabase/schema.sql to create time_entries.");
+      else setCloudError(t("cloudTimeMissing"));
     } catch (error) { setCloudError(`Clock in failed: ${(error as Error).message}`); }
   };
   const clockOut = async () => {
@@ -740,7 +763,7 @@ export default function Home() {
       return;
     const item: LineItem = {
       id: createId(),
-      kind: lineItem.kind,
+      kind: "Part",
       description: lineItem.description.trim(),
       quantity: Number(lineItem.quantity) || 1,
       amount: Number(lineItem.amount) || 0,
@@ -756,7 +779,7 @@ export default function Home() {
           : job,
       ),
     );
-    setLineItem({ kind: "Labor", description: "", quantity: "1", amount: "" });
+    setLineItem({ kind: "Part", description: "", quantity: "1", amount: "" });
   };
   const updateLineItem = (
     itemId: string,
@@ -964,11 +987,11 @@ export default function Home() {
           </div>
         </aside>
         <main className="main-content">
-          {!hasSupabaseConfig && <div className="cloud-banner cloud-warning">Cloud sync is not configured. Add `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` to `.env.local`.</div>}
+          {!hasSupabaseConfig && <div className="cloud-banner cloud-warning">{t("cloudNotConfigured")}</div>}
           {cloudError && <div className="cloud-banner cloud-warning">{cloudError}</div>}
           <div className="mobile-nav-select">
-            <span className="mobile-nav-label">{language === "en" ? "Section" : "Section"}</span>
-            <select value={section} onChange={(event) => setSection(event.target.value as Section)} aria-label={language === "en" ? "Choose section" : "Choisir une section"}>
+            <span className="mobile-nav-label">{t("section")}</span>
+            <select value={section} onChange={(event) => setSection(event.target.value as Section)} aria-label={t("chooseSection")}>
               {visibleNavItems.map((item) => <option key={item.id} value={item.id}>{t(item.label)}</option>)}
             </select>
           </div>
@@ -995,7 +1018,7 @@ export default function Home() {
                           : t("clientsSubtitle")}
               </p>
             </div>
-            <div className="date-chip">□ &nbsp; May 24, 2024 &nbsp;⌄</div>
+            <div className="date-chip">□ &nbsp; {todayLabel}</div>
           </div>
           {section === "overview" && (
             <>
@@ -1035,7 +1058,7 @@ export default function Home() {
                             <p className="card-kicker">{t("workOrders")}</p>
                               <h2>{t("activeJobs")}</h2>
                     </div>
-                    <button className="more-button">•••</button>
+                    <button className="more-button" onClick={() => setSection("jobs")} aria-label={t("activeJobQueue")}>•••</button>
                   </div>
                   <MetricCard
                     label={t("totalInProgress")}
@@ -1060,12 +1083,12 @@ export default function Home() {
                             <p className="card-kicker">{t("fleetHealth")}</p>
                               <h2>{t("unitStatus")}</h2>
                     </div>
-                    <button className="more-button">•••</button>
+                    <button className="more-button" onClick={() => setSection("units")} aria-label={t("unitManagement")}>•••</button>
                   </div>
                   <MetricCard
                     label={t("totalUnits")}
                     value={String(unitData.length)}
-                    detail="All fleet records up to date"
+                    detail={t("allFleetRecords")}
                     tone="blue"
                     icon="↗"
                   />
@@ -1096,7 +1119,7 @@ export default function Home() {
                             <p className="card-kicker">{t("fieldOperations")}</p>
                               <h2>{t("fieldService")}</h2>
                     </div>
-                    <button className="more-button">•••</button>
+                    <button className="more-button" onClick={() => setSection("jobs")} aria-label={t("activeJobQueue")}>•••</button>
                   </div>
                   <MetricCard
                     label={t("techsOnRoad")}
@@ -1138,7 +1161,7 @@ export default function Home() {
                       <span className={`activity-mark mark-${index}`} />
                       <div className="activity-copy">
                         <p>
-                          <b>{job.unit}</b> was assigned to <b>{job.tech}</b>
+                          <b>{job.unit}</b> {language === "en" ? "was assigned to" : "a été assigné à"} <b>{job.tech}</b>
                         </p>
                         <span>
                           {job.issue} · {job.updated}
@@ -1184,7 +1207,7 @@ export default function Home() {
               <PunchClock activeEntry={activeTimeEntry} jobs={jobData} language={language} onClockIn={clockIn} onClockOut={clockOut} />
               {canManageWorkOrders && <div className="manual-time-card"><div className="detail-section-heading"><h3>{language === "en" ? "Add technician time manually" : "Ajouter du temps technicien manuellement"}</h3></div><div className="manual-time-form"><select value={manualTimeUser} onChange={(event) => setManualTimeUser(event.target.value)} aria-label={t("technician")}><option value="">{language === "en" ? "Select technician" : "Sélectionner un technicien"}</option>{userAccounts.filter((account) => account.active && account.isTechnician).map((account) => <option key={account.id} value={account.name}>{account.name}</option>)}</select><select value={manualTimeJob} onChange={(event) => setManualTimeJob(event.target.value)} aria-label={t("workOrder")}><option value="">{language === "en" ? "No work order" : "Aucun ordre"}</option>{jobData.filter((job) => job.status !== "Completed").map((job) => <option key={job.id} value={job.id}>{job.unit} · {job.issue}</option>)}</select><input type="number" min="0.01" step="0.01" value={manualTimeHours} onChange={(event) => setManualTimeHours(event.target.value)} placeholder={language === "en" ? "Hours (decimal)" : "Heures (décimal)"} aria-label={language === "en" ? "Hours" : "Heures"} /><button className="primary-button" onClick={addManualTime}>{language === "en" ? "Add time" : "Ajouter le temps"}</button></div></div>}
               <div className="punch-history-section">
-                <div className="detail-section-heading"><h3>{t("punchHistory")}</h3><span>{timeEntries.length} entries</span></div>
+                <div className="detail-section-heading"><h3>{t("punchHistory")}</h3><span>{timeEntries.length} {t("entries")}</span></div>
                 <div className="table-wrap"><table className="punch-history-table"><thead><tr><th>{t("punchedBy")}</th><th>{t("workOrder")}</th><th>{t("clockIn")}</th><th>{t("clockOut")}</th><th>{t("totalHours")}</th><th>{t("status")}</th></tr></thead><tbody>{visibleTimeEntries.length ? visibleTimeEntries.map((entry) => <tr key={entry.id}><td><strong>{entry.userName}</strong></td><td>{entry.workOrderId ? (jobData.find((job) => job.id === entry.workOrderId)?.unit ?? entry.workOrderId) : t("noData")}</td><td>{new Date(entry.clockIn).toLocaleString()}</td><td>{entry.clockOut ? new Date(entry.clockOut).toLocaleString() : t("activePunch")}</td><td>{entry.totalHours == null ? t("activePunch") : `${entry.totalHours.toFixed(2)} h`}</td><td><span className={`time-status ${entry.status === "active" ? "time-active" : "time-completed"}`}>{entry.status === "active" ? t("activePunch") : t("Completed")}</span></td></tr>) : <tr><td colSpan={6} className="empty-history">{t("noPunches")}</td></tr>}</tbody></table></div>
               </div>
             </section>
@@ -1196,14 +1219,14 @@ export default function Home() {
                   <p className="card-kicker">{t("clientManagement")}</p>
                   <h2>{t("clientManagement")}</h2>
                 </div>
-                <span className="client-count">{filteredClients.length} clients</span>
+                <span className="client-count">{filteredClients.length} {t("clients")}</span>
               </div>
               <div className="client-toolbar">
-                <div className="search-box">⌕<input value={clientSearch} onChange={(event) => setClientSearch(event.target.value)} placeholder={language === "en" ? "Search clients..." : "Rechercher des clients..."} aria-label={language === "en" ? "Search clients" : "Rechercher des clients"} /></div>
-                <input className="client-add-input" placeholder={language === "en" ? "New client name" : "Nom du nouveau client"} onKeyDown={(event) => { if (event.key === "Enter") addClient(event.currentTarget); }} />
-                <button className="primary-button" onClick={(event) => { const input = event.currentTarget.previousElementSibling; if (input instanceof HTMLInputElement) addClient(input); }}>{language === "en" ? "Add client" : "Ajouter le client"}</button>
+                <div className="search-box">⌕<input value={clientSearch} onChange={(event) => setClientSearch(event.target.value)} placeholder={t("searchClients")} aria-label={t("searchClients")} /></div>
+                <input className="client-add-input" placeholder={t("newClientName")} onKeyDown={(event) => { if (event.key === "Enter") addClient(event.currentTarget); }} />
+                <button className="primary-button" onClick={(event) => { const input = event.currentTarget.previousElementSibling; if (input instanceof HTMLInputElement) addClient(input); }}>{t("addClient")}</button>
               </div>
-              <div className="client-grid">{filteredClients.map((client) => <div className="client-card" key={client}><span className="client-initial">{client.slice(0, 1).toUpperCase()}</span>{editingClient === client ? <div className="client-edit-form"><input value={editingClientName} onChange={(event) => setEditingClientName(event.target.value)} autoFocus /><div><button className="primary-button" onClick={saveClientEdit}>Save</button><button className="outline-button" onClick={() => setEditingClient(null)}>Cancel</button></div></div> : <><div className="client-card-copy"><strong>{client}</strong><small>{language === "en" ? "Fleet client" : "Client de flotte"}</small></div>{activeUser === "Marc" && <div className="client-actions"><button className="row-action" onClick={() => { setEditingClient(client); setEditingClientName(client); }}>Edit</button><button className="entry-delete" onClick={() => removeClient(client)}>Delete</button></div>}</>}</div>)}</div>
+              <div className="client-grid">{filteredClients.map((client) => <div className="client-card" key={client}><span className="client-initial">{client.slice(0, 1).toUpperCase()}</span>{editingClient === client ? <div className="client-edit-form"><input value={editingClientName} onChange={(event) => setEditingClientName(event.target.value)} autoFocus /><div><button className="primary-button" onClick={saveClientEdit}>{t("save")}</button><button className="outline-button" onClick={() => setEditingClient(null)}>{t("cancel")}</button></div></div> : <><div className="client-card-copy"><strong>{client}</strong><small>{t("fleetClient")}</small></div>{activeUser === "Marc" && <div className="client-actions"><button className="row-action" onClick={() => { setEditingClient(client); setEditingClientName(client); }}>{t("edit")}</button><button className="entry-delete" onClick={() => removeClient(client)}>{t("delete")}</button></div>}</>}</div>)}</div>
             </section>
           )}
           {section === "users" && activeUser === "Marc" && (
@@ -1277,7 +1300,7 @@ export default function Home() {
                     </button>
                   ))}
                 </div>
-                <button className="outline-button">{t("export")}</button>
+                <button className="outline-button" onClick={exportJobs}>{t("export")}</button>
               </div>
               <div className="table-wrap">
                 <table>
@@ -1354,6 +1377,9 @@ export default function Home() {
                   </tbody>
                 </table>
               </div>
+              <div className="mobile-job-list">
+                {filteredJobs.map((job) => <article className="mobile-job-card" key={`mobile-${job.id}`} onClick={() => openJobDetails(job)}><div className="mobile-job-heading"><div><strong>{job.unit}</strong><span>{job.client}</span></div><span className="work-order-id">{job.id}</span></div><p className="mobile-job-description">{job.issue}</p><div className="mobile-job-meta"><span><small>{t("technician")}</small>{job.tech}</span><span><small>{t("priority")}</small>{t(job.priority)}</span><span><small>{t("status")}</small><StatusPill status={job.status} language={language} /></span></div><small className="mobile-job-updated">{job.updated}</small></article>)}
+              </div>
             </section>
           )}
           {section === "units" && (
@@ -1362,14 +1388,14 @@ export default function Home() {
                 <MetricCard
                   label={t("totalUnits")}
                   value={String(unitData.length)}
-                  detail="↑ 6 units this quarter"
+                  detail={t("fleetRecordsDetail")}
                   tone="blue"
                   icon="▣"
                 />
                 <MetricCard
-                  label="Units overdue for PM"
+                  label={t("unitsOverduePm")}
                   value={String(unitData.filter((unit) => unit.overdue).length)}
-                  detail={language === "en" ? "Requires immediate attention" : "Attention immédiate requise"}
+                  detail={t("requiresAttention")}
                   icon="!"
                 />
               </div>
@@ -1395,7 +1421,7 @@ export default function Home() {
                       placeholder={language === "en" ? "Search by unit, VIN, or client name..." : "Rechercher une unité, un NIV ou un client..."}
                     />
                   </div>
-                  <button className="outline-button">{t("filters")}</button>
+                  <button className="outline-button" onClick={() => setUnitSearch("")}>{t("filters")}</button>
                 </div>
                 <div className="unit-list">
                   {filteredUnits.map((unit) => (
@@ -1411,15 +1437,15 @@ export default function Home() {
                         </span>
                       </div>
                       <div>
-                        <label>ASSIGNED CLIENT</label>
+                        <label>{t("assignedClientLabel")}</label>
                         <b>{unit.client}</b>
                       </div>
                       <div>
-                        <label>LAST SERVICE</label>
+                        <label>{t("lastServiceLabel")}</label>
                         <b>{unit.service}</b>
                       </div>
                       <div>
-                        <label>LAST SERVICE USAGE</label>
+                        <label>{t("lastUsageLabel")}</label>
                         <b>{unit.usage}</b>
                       </div>
                       <div className="unit-due">
@@ -1446,7 +1472,7 @@ export default function Home() {
                           openUnitHistory(unit);
                         }}
                       >
-                        {language === "en" ? "History" : "Historique"}
+                        {t("history")}
                       </button>
                       <button
                         type="button"
@@ -1467,8 +1493,8 @@ export default function Home() {
           {modal === "history" && historyUnit && (
             <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeModal(); }}>
               <div className="modal-card detail-modal unit-history-modal">
-                <div className="modal-header"><div><p className="card-kicker">{language === "en" ? "SERVICE HISTORY" : "HISTORIQUE DE SERVICE"}</p><h2>{historyUnit.unit}</h2><small>{historyUnit.client} · {historyUnit.type}</small></div><button type="button" className="modal-close" onClick={closeModal} aria-label={t("close")}>×</button></div>
-                <div className="detail-section-heading"><h3>{language === "en" ? "Completed work orders" : "Ordres de travail complétés"}</h3><span>{jobData.filter((job) => job.unit === historyUnit.unit && job.status === "Completed").length}</span></div>
+                <div className="modal-header"><div><p className="card-kicker">{t("serviceHistory")}</p><h2>{historyUnit.unit}</h2><small>{historyUnit.client} · {historyUnit.type}</small></div><button type="button" className="modal-close" onClick={closeModal} aria-label={t("close")}>×</button></div>
+                <div className="detail-section-heading"><h3>{t("completedWorkOrders")}</h3><span>{jobData.filter((job) => job.unit === historyUnit.unit && job.status === "Completed").length}</span></div>
                 <div className="service-history-list">{jobData.filter((job) => job.unit === historyUnit.unit && job.status === "Completed").map((job) => <div className="service-history-row" key={job.id}><div><strong>{job.issue}</strong><small>{job.id} · {job.updated}</small></div><span>{job.tech}</span><b>{workedHoursFor(job.id)} h</b><button className="outline-button" onClick={() => openJobDetails(job)}>{language === "en" ? "Open" : "Ouvrir"}</button></div>)}{jobData.filter((job) => job.unit === historyUnit.unit && job.status === "Completed").length === 0 && <p className="empty-history">{language === "en" ? "No completed service history for this unit." : "Aucun historique de service complété pour cette unité."}</p>}</div>
               </div>
             </div>
@@ -1487,8 +1513,7 @@ export default function Home() {
                     <p className="card-kicker">{t("workOrderDetails")} {activeJob.id}</p>
                     <h2>{activeJob.issue}</h2>
                     <small>
-                      {activeJob.unit} · {activeJob.client} · Last service
-                      usage: {activeJob.usage}
+                      {activeJob.unit} · {activeJob.client} · {t("lastServiceUsage")}: {activeJob.usage}
                     </small>
                     <span className="work-order-total-hours">{t("totalWorked")}: {workedHoursFor(activeJob.id)} h</span>
                   </div>
@@ -1571,7 +1596,7 @@ export default function Home() {
                   </label>
                 </div>
                 <div className="detail-section work-order-time-section">
-                  <div className="detail-section-heading"><h3>{t("punchHistory")}</h3><span>{timeEntries.filter((entry) => entry.workOrderId === activeJob.id).length} entries</span></div>
+                  <div className="detail-section-heading"><h3>{t("punchHistory")}</h3><span>{timeEntries.filter((entry) => entry.workOrderId === activeJob.id).length} {t("entries")}</span></div>
                   <div className="work-order-time-list">{timeEntries.filter((entry) => entry.workOrderId === activeJob.id).map((entry) => <div className="work-order-time-row" key={entry.id}><strong>{entry.userName}</strong><span>{new Date(entry.clockIn).toLocaleString()}</span><span>{entry.clockOut ? new Date(entry.clockOut).toLocaleString() : t("activePunch")}</span><b>{entry.totalHours == null ? t("activePunch") : `${entry.totalHours.toFixed(2)} h`}</b></div>)}{timeEntries.filter((entry) => entry.workOrderId === activeJob.id).length === 0 && <small className="empty-history">{t("noPunches")}</small>}</div>
                 </div>
                 <div className="detail-section">
@@ -1617,111 +1642,113 @@ export default function Home() {
                 <div className="detail-section">
                   <div className="detail-section-heading">
                     <h3>{t("parts")}</h3>
-                    <span>{(activeJob.lineItems ?? []).length} items</span>
+                    <div className="line-item-summary">
+                      <span>{(activeJob.lineItems ?? []).length} {t("items")}</span>
+                      <strong>{t("total")}: {formatCurrency((activeJob.lineItems ?? []).reduce((total, item) => total + (Number(item.quantity) || 0) * (Number(item.amount) || 0), 0))}</strong>
+                    </div>
                   </div>
                   <div className="line-item-list">
                     {(activeJob.lineItems ?? []).map((item) => (
                       <div className="line-item" key={item.id}>
-                        <select
-                          value={item.kind}
-                          onChange={(event) =>
-                            updateLineItem(item.id, "kind", event.target.value)
-                          }
-                        >
-                          <option value="Labor">{t("labor")}</option>
-                          <option value="Part">{t("part")}</option>
-                        </select>
-                        <input
-                          value={item.description}
-                          onChange={(event) =>
-                            updateLineItem(
-                              item.id,
-                              "description",
-                              event.target.value,
-                            )
-                          }
-                        />
-                        <input
-                          type="number"
-                          min="1"
-                          value={item.quantity}
-                          onChange={(event) =>
-                            updateLineItem(
-                              item.id,
-                              "quantity",
-                              event.target.value,
-                            )
-                          }
-                        />
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={item.amount}
-                          onChange={(event) =>
-                            updateLineItem(
-                              item.id,
-                              "amount",
-                              event.target.value,
-                            )
-                          }
-                        />
-                        <button
-                          className="entry-delete"
-                          onClick={() => deleteLineItem(item.id)}
-                        >
-                          {t("delete")}
-                        </button>
+                        <div className="line-item-header">
+                          <span className={`line-item-kind line-item-kind-${item.kind.toLowerCase()}`}>
+                            {item.kind === "Labor" ? t("labor") : t("part")}
+                          </span>
+                          <button
+                            className="entry-delete"
+                            onClick={() => deleteLineItem(item.id)}
+                          >
+                            {t("delete")}
+                          </button>
+                        </div>
+                        <label className="line-item-description">
+                          <span>{t("description")}</span>
+                          <input
+                            value={item.description}
+                            onChange={(event) =>
+                              updateLineItem(item.id, "description", event.target.value)
+                            }
+                          />
+                        </label>
+                        <div className="line-item-fields">
+                          <label>
+                            <span>Qty</span>
+                            <input
+                              type="number"
+                              min="1"
+                              value={item.quantity}
+                              onChange={(event) =>
+                                updateLineItem(item.id, "quantity", event.target.value)
+                              }
+                            />
+                          </label>
+                          <label>
+                            <span>{t("amountPerItem")}</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={item.amount}
+                              onChange={(event) =>
+                                updateLineItem(item.id, "amount", event.target.value)
+                              }
+                            />
+                          </label>
+                        </div>
                       </div>
                     ))}
                   </div>
                   <div className="line-item-entry">
-                    <select
-                      value={lineItem.kind}
-                      onChange={(event) =>
-                        setLineItem((current) => ({
-                          ...current,
-                          kind: event.target.value as LineItem["kind"],
-                        }))
-                      }
-                    >
-                      <option value="Labor">{t("labor")}</option>
-                      <option value="Part">{t("part")}</option>
-                    </select>
-                    <input
-                      value={lineItem.description}
-                      onChange={(event) =>
-                        setLineItem((current) => ({
-                          ...current,
-                          description: event.target.value,
-                        }))
-                      }
-                      placeholder={t("description")}
-                    />
-                    <input
-                      type="number"
-                      min="1"
-                      value={lineItem.quantity}
-                      onChange={(event) =>
-                        setLineItem((current) => ({
-                          ...current,
-                          quantity: event.target.value,
-                        }))
-                      }
-                    />
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={lineItem.amount}
-                      onChange={(event) =>
-                        setLineItem((current) => ({
-                          ...current,
-                          amount: event.target.value,
-                        }))
-                      }
-                      placeholder={t("amount")}
-                    />
+                    <div className="line-item-entry-header">
+                      <span className="line-item-entry-title">Add an item</span>
+                      <span className="line-item-entry-hint">{t("partsOnly")}</span>
+                    </div>
+                      <span className="line-item-kind line-item-kind-part">{t("part")}</span>
+                    <label className="line-item-description">
+                      <span>{t("description")}</span>
+                      <input
+                        value={lineItem.description}
+                        onChange={(event) =>
+                          setLineItem((current) => ({
+                            ...current,
+                            description: event.target.value,
+                          }))
+                        }
+                        placeholder={t("description")}
+                      />
+                    </label>
+                    <div className="line-item-fields">
+                      <label>
+                        <span>Qty</span>
+                        <input
+                          type="number"
+                          min="1"
+                          value={lineItem.quantity}
+                          onChange={(event) =>
+                            setLineItem((current) => ({
+                              ...current,
+                              quantity: event.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                      <label>
+                        <span>{t("amountPerItem")}</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={lineItem.amount}
+                          onChange={(event) =>
+                            setLineItem((current) => ({
+                              ...current,
+                              amount: event.target.value,
+                            }))
+                          }
+                          placeholder={t("amountPerItem")}
+                        />
+                      </label>
+                    </div>
                     <button className="outline-button" onClick={saveLineItem}>
                       {t("add")}
                     </button>
@@ -1807,7 +1834,7 @@ export default function Home() {
                           onChange={(event) =>
                             updateForm("usage", event.target.value)
                           }
-                          placeholder="e.g. 184220 KM or 4280 Hrs"
+                          placeholder={t("usageExample")}
                         />
                       </label>
                       <label>
@@ -1818,7 +1845,7 @@ export default function Home() {
                           onChange={(event) =>
                             updateForm("issue", event.target.value)
                           }
-                          placeholder="Describe the issue"
+                          placeholder={t("describeIssue")}
                         />
                       </label>
                       <label>
@@ -1856,7 +1883,7 @@ export default function Home() {
                           onChange={(event) =>
                             updateForm("unit", event.target.value)
                           }
-                          placeholder="e.g. TRK-506"
+                          placeholder={t("unitExample")}
                         />
                       </label>
                       <label>
@@ -1867,7 +1894,7 @@ export default function Home() {
                           onChange={(event) =>
                             updateForm("vin", event.target.value)
                           }
-                          placeholder="17-character VIN"
+                          placeholder={t("vinExample")}
                         />
                       </label>
                       <label>
@@ -1901,7 +1928,7 @@ export default function Home() {
                           onChange={(event) =>
                             updateForm("usage", event.target.value)
                           }
-                          placeholder="e.g. 184220 KM or 4280 Hrs"
+                          placeholder={t("usageExample")}
                         />
                       </label>
                       <label>
@@ -1911,7 +1938,7 @@ export default function Home() {
                           onChange={(event) =>
                             updateForm("type", event.target.value)
                           }
-                          placeholder="e.g. Volvo VNL"
+                          placeholder={t("typeExample")}
                         />
                       </label>
                     </>
