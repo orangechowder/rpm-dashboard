@@ -408,6 +408,12 @@ export default function Home() {
   const removeClient = (client: string) => {
     setClientData((current) => current.filter((item) => item !== client));
   };
+  const addClient = (input: HTMLInputElement) => {
+    const name = input.value.trim();
+    if (!name || clientData.includes(name)) return;
+    setClientData((current) => [name, ...current]);
+    input.value = "";
+  };
   const changeOwnPassword = () => {
     const account = userAccounts.find((candidate) => candidate.name === activeUser);
     if (!account || currentPassword !== account.password) { setPasswordError("Current password is incorrect."); return; }
@@ -1194,7 +1200,8 @@ export default function Home() {
               </div>
               <div className="client-toolbar">
                 <div className="search-box">⌕<input value={clientSearch} onChange={(event) => setClientSearch(event.target.value)} placeholder={language === "en" ? "Search clients..." : "Rechercher des clients..."} aria-label={language === "en" ? "Search clients" : "Rechercher des clients"} /></div>
-                <input className="client-add-input" placeholder={language === "en" ? "New client name" : "Nom du nouveau client"} onKeyDown={(event) => { if (event.key === "Enter") { const input = event.currentTarget; const name = input.value.trim(); if (name && !clientData.includes(name)) { setClientData((current) => [name, ...current]); input.value = ""; } } }} />
+                <input className="client-add-input" placeholder={language === "en" ? "New client name" : "Nom du nouveau client"} onKeyDown={(event) => { if (event.key === "Enter") addClient(event.currentTarget); }} />
+                <button className="primary-button" onClick={(event) => { const input = event.currentTarget.previousElementSibling; if (input instanceof HTMLInputElement) addClient(input); }}>{language === "en" ? "Add client" : "Ajouter le client"}</button>
               </div>
               <div className="client-grid">{filteredClients.map((client) => <div className="client-card" key={client}><span className="client-initial">{client.slice(0, 1).toUpperCase()}</span>{editingClient === client ? <div className="client-edit-form"><input value={editingClientName} onChange={(event) => setEditingClientName(event.target.value)} autoFocus /><div><button className="primary-button" onClick={saveClientEdit}>Save</button><button className="outline-button" onClick={() => setEditingClient(null)}>Cancel</button></div></div> : <><div className="client-card-copy"><strong>{client}</strong><small>{language === "en" ? "Fleet client" : "Client de flotte"}</small></div>{activeUser === "Marc" && <div className="client-actions"><button className="row-action" onClick={() => { setEditingClient(client); setEditingClientName(client); }}>Edit</button><button className="entry-delete" onClick={() => removeClient(client)}>Delete</button></div>}</>}</div>)}</div>
             </section>
@@ -1321,14 +1328,14 @@ export default function Home() {
                           </select> : <span className={`read-only-job-value priority-${job.priority.toLowerCase()}`}>{t(job.priority)}</span>}
                         </td>
                         <td onClick={(event) => event.stopPropagation()}>
-                          {canManageWorkOrders ? <select
+                          <select
                             className="inline-job-select status-select"
                             value={job.status}
                             onChange={(event) => setStatus(job.id, event.target.value as JobStatus)}
                             aria-label={`${t("status")} ${job.unit}`}
                           >
                             {(["In Progress", "Waiting on Parts", "Waiting on Estimates", "Completed"] as JobStatus[]).map((status) => <option key={status} value={status}>{t(status)}</option>)}
-                          </select> : <StatusPill status={job.status} language={language} />}
+                          </select>
                         </td>
                         <td className="updated-cell">{job.updated}</td>
                         <td>
@@ -1506,7 +1513,7 @@ export default function Home() {
                   </label>
                   <label>
                     {t("status")}
-                    {canManageWorkOrders ? <select
+                    <select
                       value={activeJob.status}
                       onChange={(event) =>
                         updateJob("status", event.target.value)
@@ -1522,7 +1529,7 @@ export default function Home() {
                       ).map((status) => (
                         <option key={status} value={status}>{t(status)}</option>
                       ))}
-                    </select> : <span className="read-only-detail-value"><StatusPill status={activeJob.status} language={language} /></span>}
+                    </select>
                   </label>
                   <label>
                     {t("priority")}
