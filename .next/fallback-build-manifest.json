@@ -1,0 +1,15 @@
+{
+  "pages": {
+    "/_app": []
+  },
+  "devFiles": [],
+  "polyfillFiles": [],
+  "lowPriorityFiles": [
+    "static/jZTneqNA_olvarlibCB7O/_buildManifest.js",
+    "static/jZTneqNA_olvarlibCB7O/_ssgManifest.js",
+    "static/jZTneqNA_olvarlibCB7O/_clientMiddlewareManifest.js"
+  ],
+  "rootMainFiles": [],
+  "rootMainFilesTree": {},
+  "pagesChunkGroupBootstrapParams": {}
+}

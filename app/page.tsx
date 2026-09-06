@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 
 type Section = "overview" | "jobs" | "units";
+type Language = "en" | "fr";
 type JobStatus =
   "In Progress" | "Waiting on Parts" | "Waiting on Estimates" | "Completed";
 type Note = { id: string; text: string; author: string; createdAt: string };
@@ -148,10 +149,25 @@ const units: Unit[] = [
   },
 ];
 const navItems: { id: Section; label: string; icon: string }[] = [
-  { id: "overview", label: "Dashboard Overview", icon: "▦" },
-  { id: "jobs", label: "Active Job Queue", icon: "≡" },
-  { id: "units", label: "Unit Management", icon: "▣" },
+  { id: "overview", label: "dashboardOverview", icon: "▦" },
+  { id: "jobs", label: "activeJobQueue", icon: "≡" },
+  { id: "units", label: "unitManagement", icon: "▣" },
 ];
+
+const translations: Record<Language, Record<string, string>> = {
+  en: {
+    dashboardOverview: "Dashboard Overview", activeJobQueue: "Active Job Queue", unitManagement: "Unit Management", workspace: "WORKSPACE",
+    goodMorning: "Good morning, Jordan", overviewSubtitle: "Here's what's happening across your fleet today.", jobsSubtitle: "Monitor and coordinate every active service request.", unitsSubtitle: "Keep your fleet records current and service-ready.", systemOperational: "System operational", lastSynced: "Last synced just now", emergency: "Emergency", reviewUnits: "Review units →",
+    workOrders: "WORK ORDERS", activeJobs: "Active Jobs", totalInProgress: "Total in progress", waitingParts: "Waiting on parts", waitingEstimates: "Waiting on estimates", fleetHealth: "FLEET HEALTH", unitStatus: "Unit Status", totalUnits: "Total units repertoried", fleetRecords: "All fleet records up to date", pmCompliance: "PM compliance", overduePm: "units overdue for PM", fieldOperations: "FIELD OPERATIONS", fieldService: "Field Service", techsOnRoad: "Technicians on road", unassignedCalls: "Unassigned calls", responseTime: "Avg response time", recentActivity: "RECENT ACTIVITY", latestUpdates: "Latest updates", viewAll: "View all →", quickActions: "QUICK ACTIONS", quickQuestion: "What would you like to do?", createWorkOrder: "Create work order", startService: "Start a new service request", addUnit: "Add a unit", registerAsset: "Register a vehicle or asset", serviceOperations: "SERVICE OPERATIONS", workOrderQueue: "Work order queue", newWorkOrder: "+ New work order", export: "Export ↓", assetDatabase: "ASSET DATABASE", fleetDirectory: "Fleet directory", addNewUnit: "+ Add unit", filters: "Filters ≡", assignedClient: "ASSIGNED CLIENT", lastService: "LAST SERVICE", lastUsage: "LAST SERVICE USAGE", pmNeeded: "PM needed", pmClear: "PM clear", workOrder: "Work order", unitClient: "Unit / client", technician: "Technician", priority: "Priority", status: "Status", updated: "Updated", fleetUnit: "Fleet unit", selectUnit: "Select a unit from the repertory", addNewUnitOption: "+ Add New Unit to Repertory", serviceRequest: "Service request", lastServiceUsage: "Last service mileage / hours", unitNumber: "Unit number", vin: "VIN", clientName: "Client name", lastServiceDate: "Last service", unitType: "Unit type", saveUnit: "Save unit", cancel: "Cancel", deleteUnit: "Delete unit", close: "Close modal", workOrderDetails: "WORK ORDER", notes: "Technician notes", addNotePlaceholder: "Add a timestamped note...", addNote: "Add note", parts: "Labor & parts", description: "Description", amount: "Amount", add: "Add", delete: "Delete", deleteWorkOrder: "Delete work order", done: "Done", createTitle: "Create work order", addUnitTitle: "Add fleet unit", editUnitTitle: "Edit fleet unit", addToRepertory: "Add unit to repertory", part: "Part", labor: "Labor", loginTitle: "RPM Diesel Dashboard", loginSubtitle: "Sign in to manage fleet operations", name: "Name", password: "Password", signIn: "Sign in", invalidLogin: "Enter a valid name and password.", signedInAs: "Signed in as", signOut: "Sign out", language: "Switch language",
+    "In Progress": "In Progress", "Waiting on Parts": "Waiting on Parts", "Waiting on Estimates": "Waiting on Estimates", Completed: "Completed", High: "High", Normal: "Normal", Low: "Low",
+  },
+  fr: {
+    dashboardOverview: "Vue d'ensemble", activeJobQueue: "File des travaux actifs", unitManagement: "Gestion des unités", workspace: "ESPACE DE TRAVAIL",
+    goodMorning: "Bonjour, Jordan", overviewSubtitle: "Voici ce qui se passe dans votre flotte aujourd'hui.", jobsSubtitle: "Surveillez et coordonnez chaque demande de service active.", unitsSubtitle: "Gardez les dossiers de votre flotte à jour et prête pour le service.", systemOperational: "Système opérationnel", lastSynced: "Synchronisé à l'instant", emergency: "Urgence", reviewUnits: "Réviser les unités →",
+    workOrders: "ORDRES DE TRAVAIL", activeJobs: "Travaux actifs", totalInProgress: "Total en cours", waitingParts: "En attente de pièces", waitingEstimates: "En attente d'estimations", fleetHealth: "ÉTAT DE LA FLOTTE", unitStatus: "État des unités", totalUnits: "Total des unités répertoriées", fleetRecords: "Tous les dossiers sont à jour", pmCompliance: "Conformité PM", overduePm: "unités en retard de PM", fieldOperations: "OPÉRATIONS TERRAIN", fieldService: "Service sur le terrain", techsOnRoad: "Techniciens sur la route", unassignedCalls: "Appels non assignés", responseTime: "Temps de réponse moyen", recentActivity: "ACTIVITÉ RÉCENTE", latestUpdates: "Dernières mises à jour", viewAll: "Voir tout →", quickActions: "ACTIONS RAPIDES", quickQuestion: "Que voulez-vous faire?", createWorkOrder: "Créer un ordre de travail", startService: "Démarrer une demande de service", addUnit: "Ajouter une unité", registerAsset: "Enregistrer un véhicule ou un actif", serviceOperations: "OPÉRATIONS DE SERVICE", workOrderQueue: "File des ordres de travail", newWorkOrder: "+ Nouvel ordre de travail", export: "Exporter ↓", assetDatabase: "BASE DES ACTIFS", fleetDirectory: "Répertoire de la flotte", addNewUnit: "+ Ajouter une unité", filters: "Filtres ≡", assignedClient: "CLIENT ASSIGNÉ", lastService: "DERNIER SERVICE", lastUsage: "DERNIÈRE UTILISATION", pmNeeded: "PM requis", pmClear: "PM à jour", workOrder: "Ordre de travail", unitClient: "Unité / client", technician: "Technicien", priority: "Priorité", status: "Statut", updated: "Mis à jour", fleetUnit: "Unité de la flotte", selectUnit: "Sélectionner une unité du répertoire", addNewUnitOption: "+ Ajouter une unité au répertoire", serviceRequest: "Demande de service", lastServiceUsage: "Kilométrage / heures depuis le dernier service", unitNumber: "Numéro d'unité", vin: "NIV", clientName: "Nom du client", lastServiceDate: "Dernier service", unitType: "Type d'unité", saveUnit: "Enregistrer l'unité", cancel: "Annuler", deleteUnit: "Supprimer l'unité", close: "Fermer la fenêtre", workOrderDetails: "ORDRE DE TRAVAIL", notes: "Notes du technicien", addNotePlaceholder: "Ajouter une note horodatée...", addNote: "Ajouter la note", parts: "Main-d'œuvre et pièces", description: "Description", amount: "Montant", add: "Ajouter", delete: "Supprimer", deleteWorkOrder: "Supprimer l'ordre de travail", done: "Terminé", createTitle: "Créer un ordre de travail", addUnitTitle: "Ajouter une unité", editUnitTitle: "Modifier l'unité", addToRepertory: "Ajouter au répertoire", part: "Pièce", labor: "Main-d'œuvre", loginTitle: "Tableau de bord RPM Diesel", loginSubtitle: "Connectez-vous pour gérer les opérations de flotte", name: "Nom", password: "Mot de passe", signIn: "Se connecter", invalidLogin: "Entrez un nom et un mot de passe valides.", signedInAs: "Session de", signOut: "Se déconnecter", language: "Changer de langue",
+    "In Progress": "En cours", "Waiting on Parts": "En attente de pièces", "Waiting on Estimates": "En attente d'estimations", Completed: "Terminé", High: "Élevée", Normal: "Normale", Low: "Faible",
+  },
+};
 
 function loadStored<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
@@ -163,7 +179,7 @@ function loadStored<T>(key: string, fallback: T): T {
   }
 }
 
-function StatusPill({ status }: { status: JobStatus }) {
+function StatusPill({ status, language }: { status: JobStatus; language: Language }) {
   const styles = {
     "In Progress": "status-blue",
     "Waiting on Parts": "status-amber",
@@ -173,7 +189,7 @@ function StatusPill({ status }: { status: JobStatus }) {
   return (
     <span className={`status-pill ${styles[status]}`}>
       <span className="status-dot" />
-      {status}
+      {translations[language][status]}
     </span>
   );
 }
@@ -206,6 +222,11 @@ function MetricCard({
 }
 
 export default function Home() {
+  const [language, setLanguage] = useState<Language>(() => loadStored("rpm-diesel-language", "en" as Language));
+  const [activeUser, setActiveUser] = useState<string | null>(() => loadStored("rpm-diesel-session", null as string | null));
+  const [loginName, setLoginName] = useState("Andrée-Anne");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState(false);
   const [section, setSection] = useState<Section>("overview");
   const [jobFilter, setJobFilter] = useState<"All" | JobStatus>("All");
   const [unitSearch, setUnitSearch] = useState("");
@@ -244,6 +265,27 @@ export default function Home() {
       usage: job.usage ?? "Not recorded",
     })),
   );
+  const t = (key: string) => translations[language][key] ?? key;
+  const accounts = ["Andrée-Anne", "Marc", "Dannick"];
+  const signIn = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (accounts.includes(loginName) && loginPassword === "12345678") {
+      setActiveUser(loginName);
+      setLoginError(false);
+      window.localStorage.setItem("rpm-diesel-session", JSON.stringify(loginName));
+    } else {
+      setLoginError(true);
+    }
+  };
+  const signOut = () => {
+    setActiveUser(null);
+    window.localStorage.removeItem("rpm-diesel-session");
+  };
+  const toggleLanguage = () => {
+    const next = language === "en" ? "fr" : "en";
+    setLanguage(next);
+    window.localStorage.setItem("rpm-diesel-language", JSON.stringify(next));
+  };
   useEffect(() => {
     window.localStorage.setItem("rpm-diesel-jobs", JSON.stringify(jobData));
   }, [jobData]);
@@ -262,6 +304,25 @@ export default function Home() {
       ),
     [unitData, unitSearch],
   );
+  if (!activeUser) {
+    return (
+      <main className="login-shell">
+        <div className="login-card">
+          <Image className="login-logo" src="/logo3.png" alt="RPM Diesel logo" width={96} height={72} priority />
+          <p className="card-kicker">RPM DIESEL</p>
+          <h1>{t("loginTitle")}</h1>
+          <p className="login-subtitle">{t("loginSubtitle")}</p>
+          <form onSubmit={signIn} className="login-form">
+            <label>{t("name")}<select value={loginName} onChange={(event) => setLoginName(event.target.value)}>{accounts.map((account) => <option key={account}>{account}</option>)}</select></label>
+            <label>{t("password")}<input type="password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} autoComplete="current-password" /></label>
+            {loginError && <p className="login-error">{t("invalidLogin")}</p>}
+            <button className="primary-button" type="submit">{t("signIn")}</button>
+          </form>
+          <button className="language-button login-language" onClick={toggleLanguage}>{language === "en" ? "FR" : "EN"}</button>
+        </div>
+      </main>
+    );
+  }
   const activeJob = detailJobId
     ? jobData.find((job) => job.id === detailJobId)
     : undefined;
@@ -562,15 +623,15 @@ export default function Home() {
         </div>
         <div className="topbar-actions">
           <a href="tel:4509992221" className="emergency-button">
-            ◉ <span className="desktop-only">Emergency </span>450 999-2221
+            ◉ <span className="desktop-only">{t("emergency")} </span>450 999-2221
           </a>
-          <button className="language-button">FR</button>
-          <div className="avatar">JD</div>
+          <button className="language-button" onClick={toggleLanguage} aria-label={t("language")}>{language === "en" ? "FR" : "EN"}</button>
+          <button className="avatar" onClick={signOut} title={`${t("signedInAs")} ${activeUser}`}>{activeUser.slice(0, 2).toUpperCase()}</button>
         </div>
       </header>
       <div className="dashboard-layout">
         <aside className="sidebar">
-          <p className="sidebar-label">WORKSPACE</p>
+          <p className="sidebar-label">{t("workspace")}</p>
           <nav className="sidebar-nav">
             {navItems.map((item) => (
               <button
@@ -579,15 +640,15 @@ export default function Home() {
                 className={`nav-item ${section === item.id ? "nav-item-active" : ""}`}
               >
                 <span className="nav-icon">{item.icon}</span>
-                {item.label}
+                {t(item.label)}
               </button>
             ))}
           </nav>
           <div className="sidebar-footer">
             <span className="online-dot" />
             <div>
-              <b>System operational</b>
-              <small>Last synced just now</small>
+                <b>{t("systemOperational")}</b>
+              <small>{t("lastSynced")}</small>
             </div>
           </div>
         </aside>
@@ -599,7 +660,7 @@ export default function Home() {
                 onClick={() => setSection(item.id)}
                 className={section === item.id ? "mobile-nav-active" : ""}
               >
-                {item.label}
+                {t(item.label)}
               </button>
             ))}
           </div>
@@ -607,19 +668,19 @@ export default function Home() {
             <div>
               <p className="breadcrumb">
                 RPM DIESEL <span>/</span>{" "}
-                {navItems.find((item) => item.id === section)?.label}
+                {t(navItems.find((item) => item.id === section)?.label ?? "")}
               </p>
               <h1>
                 {section === "overview"
-                  ? "Good morning, Jordan"
-                  : navItems.find((item) => item.id === section)?.label}
+                  ? t("goodMorning")
+                  : t(navItems.find((item) => item.id === section)?.label ?? "")}
               </h1>
               <p className="page-subtitle">
                 {section === "overview"
-                  ? "Here's what's happening across your fleet today."
+                  ? t("overviewSubtitle")
                   : section === "jobs"
-                    ? "Monitor and coordinate every active service request."
-                    : "Keep your fleet records current and service-ready."}
+                    ? t("jobsSubtitle")
+                    : t("unitsSubtitle")}
               </p>
             </div>
             <div className="date-chip">□ &nbsp; May 24, 2024 &nbsp;⌄</div>
@@ -630,40 +691,39 @@ export default function Home() {
                 <span className="alert-icon">!</span>
                 <div>
                   <b>
-                    {unitData.filter((unit) => unit.overdue).length} units are
-                    overdue for preventative maintenance.
+                    {unitData.filter((unit) => unit.overdue).length} {t("overduePm")}
                   </b>
                   <span>
                     {" "}
-                    Schedule service before they go back on the road.
+                    {language === "en" ? " Schedule service before they go back on the road." : " Planifiez le service avant leur retour sur la route."}
                   </span>
                 </div>
                 <button onClick={() => setSection("units")}>
-                  Review units →
+                  {t("reviewUnits")}
                 </button>
               </div>
               <section className="metrics-grid">
                 <div className="section-card metric-group">
                   <div className="card-heading">
                     <div>
-                      <p className="card-kicker">WORK ORDERS</p>
-                      <h2>Active Jobs</h2>
+                            <p className="card-kicker">{t("workOrders")}</p>
+                              <h2>{t("activeJobs")}</h2>
                     </div>
                     <button className="more-button">•••</button>
                   </div>
                   <MetricCard
-                    label="Total in progress"
+                    label={t("totalInProgress")}
                     value="24"
                     detail="↑ 8% from last week"
                     icon="↗"
                   />
                   <div className="mini-metrics">
                     <div>
-                      <span>● Waiting on parts</span>
+                      <span>● {t("waitingParts")}</span>
                       <b>7</b>
                     </div>
                     <div>
-                      <span>● Waiting on estimates</span>
+                      <span>● {t("waitingEstimates")}</span>
                       <b>4</b>
                     </div>
                   </div>
@@ -671,13 +731,13 @@ export default function Home() {
                 <div className="section-card metric-group">
                   <div className="card-heading">
                     <div>
-                      <p className="card-kicker">FLEET HEALTH</p>
-                      <h2>Unit Status</h2>
+                            <p className="card-kicker">{t("fleetHealth")}</p>
+                              <h2>{t("unitStatus")}</h2>
                     </div>
                     <button className="more-button">•••</button>
                   </div>
                   <MetricCard
-                    label="Total units repertoried"
+                    label={t("totalUnits")}
                     value={String(unitData.length)}
                     detail="All fleet records up to date"
                     tone="blue"
@@ -685,7 +745,7 @@ export default function Home() {
                   />
                   <div className="unit-progress">
                     <div className="progress-label">
-                      <span>PM compliance</span>
+                      <span>{t("pmCompliance")}</span>
                       <b>
                         {unitData.length
                           ? `${Math.round(((unitData.length - unitData.filter((unit) => unit.overdue).length) / unitData.length) * 1000) / 10}%`
@@ -700,21 +760,20 @@ export default function Home() {
                       />
                     </div>
                     <p>
-                      {unitData.filter((unit) => unit.overdue).length} units
-                      overdue for PM
+                      {unitData.filter((unit) => unit.overdue).length} {t("overduePm")}
                     </p>
                   </div>
                 </div>
                 <div className="section-card metric-group">
                   <div className="card-heading">
                     <div>
-                      <p className="card-kicker">FIELD OPERATIONS</p>
-                      <h2>Field Service</h2>
+                            <p className="card-kicker">{t("fieldOperations")}</p>
+                              <h2>{t("fieldService")}</h2>
                     </div>
                     <button className="more-button">•••</button>
                   </div>
                   <MetricCard
-                    label="Technicians on road"
+                    label={t("techsOnRoad")}
                     value="12"
                     detail="↑ 2 since 8:00 AM"
                     tone="green"
@@ -722,11 +781,11 @@ export default function Home() {
                   />
                   <div className="mini-metrics">
                     <div>
-                      <span>● Unassigned calls</span>
+                      <span>● {t("unassignedCalls")}</span>
                       <b>3</b>
                     </div>
                     <div>
-                      <span>● Avg response time</span>
+                      <span>● {t("responseTime")}</span>
                       <b>
                         42 <small>min</small>
                       </b>
@@ -738,14 +797,14 @@ export default function Home() {
                 <div className="section-card activity-card">
                   <div className="card-heading">
                     <div>
-                      <p className="card-kicker">RECENT ACTIVITY</p>
-                      <h2>Latest updates</h2>
+                      <p className="card-kicker">{t("recentActivity")}</p>
+                      <h2>{t("latestUpdates")}</h2>
                     </div>
                     <button
                       className="text-button"
                       onClick={() => setSection("jobs")}
                     >
-                      View all →
+                      {t("viewAll")}
                     </button>
                   </div>
                   {jobData.slice(0, 3).map((job, index) => (
@@ -759,21 +818,21 @@ export default function Home() {
                           {job.issue} · {job.updated}
                         </span>
                       </div>
-                      <StatusPill status={job.status} />
+                      <StatusPill status={job.status} language={language} />
                     </div>
                   ))}
                 </div>
                 <div className="section-card quick-card">
-                  <p className="card-kicker">QUICK ACTIONS</p>
-                  <h2>What would you like to do?</h2>
+                  <p className="card-kicker">{t("quickActions")}</p>
+                  <h2>{t("quickQuestion")}</h2>
                   <button
                     onClick={() => setSection("jobs")}
                     className="quick-action"
                   >
                     <i>+</i>
                     <span>
-                      <b>Create work order</b>
-                      <small>Start a new service request</small>
+                      <b>{t("createWorkOrder")}</b>
+                      <small>{t("startService")}</small>
                     </span>
                     →
                   </button>
@@ -783,8 +842,8 @@ export default function Home() {
                   >
                     <i>+</i>
                     <span>
-                      <b>Add a unit</b>
-                      <small>Register a vehicle or asset</small>
+                      <b>{t("addUnit")}</b>
+                      <small>{t("registerAsset")}</small>
                     </span>
                     →
                   </button>
@@ -796,14 +855,14 @@ export default function Home() {
             <section className="section-card full-card">
               <div className="toolbar">
                 <div>
-                  <p className="card-kicker">SERVICE OPERATIONS</p>
-                  <h2>Work order queue</h2>
+                  <p className="card-kicker">{t("serviceOperations")}</p>
+                  <h2>{t("workOrderQueue")}</h2>
                 </div>
                 <button
                   className="primary-button"
                   onClick={() => openModal("job")}
                 >
-                  + New work order
+                  {t("newWorkOrder")}
                 </button>
               </div>
               <div className="filter-row">
@@ -822,7 +881,7 @@ export default function Home() {
                       onClick={() => setJobFilter(filter)}
                       className={jobFilter === filter ? "filter-active" : ""}
                     >
-                      {filter}
+                      {filter === "All" ? (language === "en" ? "All" : "Tous") : t(filter)}
                       <span>
                         {filter === "All"
                           ? jobData.length
@@ -832,18 +891,18 @@ export default function Home() {
                     </button>
                   ))}
                 </div>
-                <button className="outline-button">Export ↓</button>
+                <button className="outline-button">{t("export")}</button>
               </div>
               <div className="table-wrap">
                 <table>
                   <thead>
                     <tr>
-                      <th>Work order</th>
-                      <th>Unit / client</th>
-                      <th>Technician</th>
-                      <th>Priority</th>
-                      <th>Status</th>
-                      <th>Updated</th>
+                      <th>{t("workOrder")}</th>
+                      <th>{t("unitClient")}</th>
+                      <th>{t("technician")}</th>
+                      <th>{t("priority")}</th>
+                      <th>{t("status")}</th>
+                      <th>{t("updated")}</th>
                       <th />
                     </tr>
                   </thead>
@@ -893,7 +952,7 @@ export default function Home() {
                               );
                             }}
                           >
-                            <StatusPill status={job.status} />
+                            <StatusPill status={job.status} language={language} />
                           </button>
                         </td>
                         <td className="updated-cell">{job.updated}</td>
@@ -919,7 +978,7 @@ export default function Home() {
             <>
               <div className="unit-metrics">
                 <MetricCard
-                  label="Total units repertoried"
+                  label={t("totalUnits")}
                   value={String(unitData.length)}
                   detail="↑ 6 units this quarter"
                   tone="blue"
@@ -928,21 +987,21 @@ export default function Home() {
                 <MetricCard
                   label="Units overdue for PM"
                   value={String(unitData.filter((unit) => unit.overdue).length)}
-                  detail="Requires immediate attention"
+                  detail={language === "en" ? "Requires immediate attention" : "Attention immédiate requise"}
                   icon="!"
                 />
               </div>
               <section className="section-card full-card">
                 <div className="toolbar">
                   <div>
-                    <p className="card-kicker">ASSET DATABASE</p>
-                    <h2>Fleet directory</h2>
+                    <p className="card-kicker">{t("assetDatabase")}</p>
+                    <h2>{t("fleetDirectory")}</h2>
                   </div>
                   <button
                     className="primary-button"
                     onClick={() => openModal("unit")}
                   >
-                    + Add unit
+                    {t("addNewUnit")}
                   </button>
                 </div>
                 <div className="search-row">
@@ -951,10 +1010,10 @@ export default function Home() {
                     <input
                       value={unitSearch}
                       onChange={(event) => setUnitSearch(event.target.value)}
-                      placeholder="Search by unit, VIN, or client name..."
+                      placeholder={language === "en" ? "Search by unit, VIN, or client name..." : "Rechercher une unité, un NIV ou un client..."}
                     />
                   </div>
-                  <button className="outline-button">Filters ≡</button>
+                  <button className="outline-button">{t("filters")}</button>
                 </div>
                 <div className="unit-list">
                   {filteredUnits.map((unit) => (
@@ -991,7 +1050,7 @@ export default function Home() {
                           }}
                           aria-label={`Toggle PM for ${unit.unit}`}
                         >
-                          <span>{unit.overdue ? "PM needed" : "PM clear"}</span>
+                          <span>{unit.overdue ? t("pmNeeded") : t("pmClear")}</span>
                         </button>
                         <small>{unit.due}</small>
                       </div>
@@ -1021,7 +1080,7 @@ export default function Home() {
               <div className="modal-card detail-modal">
                 <div className="modal-header">
                   <div>
-                    <p className="card-kicker">WORK ORDER {activeJob.id}</p>
+                    <p className="card-kicker">{t("workOrderDetails")} {activeJob.id}</p>
                     <h2>{activeJob.issue}</h2>
                     <small>
                       {activeJob.unit} · {activeJob.client} · Last service
@@ -1039,7 +1098,7 @@ export default function Home() {
                 </div>
                 <div className="detail-controls">
                   <label>
-                    Status
+                    {t("status")}
                     <select
                       value={activeJob.status}
                       onChange={(event) =>
@@ -1054,12 +1113,12 @@ export default function Home() {
                           "Completed",
                         ] as JobStatus[]
                       ).map((status) => (
-                        <option key={status}>{status}</option>
+                        <option key={status} value={status}>{t(status)}</option>
                       ))}
                     </select>
                   </label>
                   <label>
-                    Priority
+                    {t("priority")}
                     <select
                       value={activeJob.priority}
                       onChange={(event) =>
@@ -1068,13 +1127,13 @@ export default function Home() {
                     >
                       {(["High", "Normal", "Low"] as Job["priority"][]).map(
                         (priority) => (
-                          <option key={priority}>{priority}</option>
+                          <option key={priority} value={priority}>{t(priority)}</option>
                         ),
                       )}
                     </select>
                   </label>
                   <label>
-                    Technician
+                    {t("technician")}
                     <select
                       value={activeJob.tech}
                       onChange={(event) =>
@@ -1093,7 +1152,7 @@ export default function Home() {
                     </select>
                   </label>
                   <label>
-                    Last service mileage / hours
+                    {t("lastServiceUsage")}
                     <input
                       value={activeJob.usage}
                       onChange={(event) =>
@@ -1105,7 +1164,7 @@ export default function Home() {
                 </div>
                 <div className="detail-section">
                   <div className="detail-section-heading">
-                    <h3>Technician notes</h3>
+                    <h3>{t("notes")}</h3>
                     <span>{activeJob.notes?.length ?? 0} notes</span>
                   </div>
                   <div className="note-list">
@@ -1125,7 +1184,7 @@ export default function Home() {
                           className="entry-delete"
                           onClick={() => deleteNote(note.id)}
                         >
-                          Delete
+                          {t("delete")}
                         </button>
                       </div>
                     ))}
@@ -1134,16 +1193,16 @@ export default function Home() {
                     <input
                       value={noteText}
                       onChange={(event) => setNoteText(event.target.value)}
-                      placeholder="Add a timestamped note..."
+                      placeholder={t("addNotePlaceholder")}
                     />
                     <button className="primary-button" onClick={saveNote}>
-                      Add note
+                      {t("addNote")}
                     </button>
                   </div>
                 </div>
                 <div className="detail-section">
                   <div className="detail-section-heading">
-                    <h3>Labor & parts</h3>
+                    <h3>{t("parts")}</h3>
                     <span>{(activeJob.lineItems ?? []).length} items</span>
                   </div>
                   <div className="line-item-list">
@@ -1155,8 +1214,8 @@ export default function Home() {
                             updateLineItem(item.id, "kind", event.target.value)
                           }
                         >
-                          <option>Labor</option>
-                          <option>Part</option>
+                          <option value="Labor">{t("labor")}</option>
+                          <option value="Part">{t("part")}</option>
                         </select>
                         <input
                           value={item.description}
@@ -1197,7 +1256,7 @@ export default function Home() {
                           className="entry-delete"
                           onClick={() => deleteLineItem(item.id)}
                         >
-                          Delete
+                          {t("delete")}
                         </button>
                       </div>
                     ))}
@@ -1212,8 +1271,8 @@ export default function Home() {
                         }))
                       }
                     >
-                      <option>Labor</option>
-                      <option>Part</option>
+                      <option value="Labor">{t("labor")}</option>
+                      <option value="Part">{t("part")}</option>
                     </select>
                     <input
                       value={lineItem.description}
@@ -1223,7 +1282,7 @@ export default function Home() {
                           description: event.target.value,
                         }))
                       }
-                      placeholder="Description"
+                      placeholder={t("description")}
                     />
                     <input
                       type="number"
@@ -1247,10 +1306,10 @@ export default function Home() {
                           amount: event.target.value,
                         }))
                       }
-                      placeholder="Amount"
+                      placeholder={t("amount")}
                     />
                     <button className="outline-button" onClick={saveLineItem}>
-                      Add
+                      {t("add")}
                     </button>
                   </div>
                 </div>
@@ -1259,10 +1318,10 @@ export default function Home() {
                     className="danger-button"
                     onClick={() => deleteJob(activeJob.id)}
                   >
-                    Delete work order
+                    {t("deleteWorkOrder")}
                   </button>
                   <button className="outline-button" onClick={closeModal}>
-                    Done
+                    {t("done")}
                   </button>
                 </div>
               </div>
@@ -1281,17 +1340,17 @@ export default function Home() {
                   <div>
                     <p className="card-kicker">
                       {modal === "job"
-                        ? "SERVICE OPERATIONS"
-                        : "FLEET DATABASE"}
+                        ? t("serviceOperations")
+                        : t("assetDatabase")}
                     </p>
                     <h2>
                       {modal === "job"
-                        ? "Create work order"
+                        ? t("createTitle")
                         : returnToJob
-                          ? "Add unit to repertory"
+                          ? t("addToRepertory")
                           : editingUnitId
-                            ? "Edit fleet unit"
-                            : "Add fleet unit"}
+                            ? t("editUnitTitle")
+                            : t("addUnitTitle")}
                     </h2>
                   </div>
                   <button
@@ -1307,14 +1366,14 @@ export default function Home() {
                   {modal === "job" ? (
                     <>
                       <label>
-                        Fleet unit
+                        {t("fleetUnit")}
                         <select
                           required
                           value={form.unit}
                           onChange={(event) => selectUnit(event.target.value)}
                         >
                           <option value="">
-                            Select a unit from the repertory
+                            {t("selectUnit")}
                           </option>
                           {unitData.map((unit) => (
                             <option key={unit.unit} value={unit.unit}>
@@ -1322,12 +1381,12 @@ export default function Home() {
                             </option>
                           ))}
                           <option value="__add_new_unit__">
-                            + Add New Unit to Repertory
+                            {t("addNewUnitOption")}
                           </option>
                         </select>
                       </label>
                       <label>
-                        Last service mileage / hours
+                        {t("lastServiceUsage")}
                         <input
                           required
                           value={form.usage}
@@ -1338,7 +1397,7 @@ export default function Home() {
                         />
                       </label>
                       <label>
-                        Service request
+                        {t("serviceRequest")}
                         <input
                           required
                           value={form.issue}
@@ -1349,14 +1408,14 @@ export default function Home() {
                         />
                       </label>
                       <label>
-                        Technician
+                        {t("technician")}
                         <select
                           value={form.tech}
                           onChange={(event) =>
                             updateForm("tech", event.target.value)
                           }
                         >
-                          <option>Unassigned</option>
+                          <option value="Unassigned">Unassigned</option>
                           <option>Marcus T.</option>
                           <option>Jamie R.</option>
                           <option>Devin L.</option>
@@ -1364,23 +1423,23 @@ export default function Home() {
                         </select>
                       </label>
                       <label>
-                        Priority
+                        {t("priority")}
                         <select
                           value={form.priority}
                           onChange={(event) =>
                             updateForm("priority", event.target.value)
                           }
                         >
-                          <option>High</option>
-                          <option>Normal</option>
-                          <option>Low</option>
+                          <option value="High">{t("High")}</option>
+                          <option value="Normal">{t("Normal")}</option>
+                          <option value="Low">{t("Low")}</option>
                         </select>
                       </label>
                     </>
                   ) : (
                     <>
                       <label>
-                        Unit number
+                        {t("unitNumber")}
                         <input
                           required
                           value={form.unit}
@@ -1391,7 +1450,7 @@ export default function Home() {
                         />
                       </label>
                       <label>
-                        VIN
+                        {t("vin")}
                         <input
                           required
                           value={form.vin}
@@ -1402,7 +1461,7 @@ export default function Home() {
                         />
                       </label>
                       <label>
-                        Client name
+                        {t("clientName")}
                         <input
                           required
                           value={form.client}
@@ -1413,7 +1472,7 @@ export default function Home() {
                         />
                       </label>
                       <label>
-                        Last service
+                        {t("lastServiceDate")}
                         <input
                           type="date"
                           value={form.service}
@@ -1423,7 +1482,7 @@ export default function Home() {
                         />
                       </label>
                       <label>
-                        Last service mileage / hours
+                        {t("lastServiceUsage")}
                         <input
                           required
                           value={form.usage}
@@ -1434,7 +1493,7 @@ export default function Home() {
                         />
                       </label>
                       <label>
-                        Unit type
+                        {t("unitType")}
                         <input
                           value={form.type}
                           onChange={(event) =>
@@ -1453,7 +1512,7 @@ export default function Home() {
                       className="danger-button"
                       onClick={() => deleteUnit(editingUnitId)}
                     >
-                      Delete unit
+                      {t("deleteUnit")}
                     </button>
                   )}
                   <button
@@ -1461,10 +1520,10 @@ export default function Home() {
                     className="outline-button"
                     onClick={closeModal}
                   >
-                    Cancel
+                    {t("cancel")}
                   </button>
                   <button type="submit" className="primary-button">
-                    {modal === "job" ? "Create work order" : "Save unit"}
+                    {modal === "job" ? t("createWorkOrder") : t("saveUnit")}
                   </button>
                 </div>
               </form>
