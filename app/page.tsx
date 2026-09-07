@@ -300,6 +300,8 @@ export default function Home() {
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState(false);
   const [section, setSection] = useState<Section>("overview");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [jobFilter, setJobFilter] = useState<"All" | JobStatus>("All");
   const [unitSearch, setUnitSearch] = useState("");
   const [clientSearch, setClientSearch] = useState("");
@@ -1083,6 +1085,9 @@ export default function Home() {
     );
   const submitForm = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (submitting) return;
+    setSubmitting(true);
+    try {
     if (modal === "job") {
       if (!form.meterReading.trim() || !form.unit) {
         setCloudError(language === "en" ? "Opening meter reading is required." : "La lecture du compteur à l'ouverture est obligatoire.");
@@ -1169,6 +1174,9 @@ export default function Home() {
       setSection("units");
     }
     closeModal();
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -1236,9 +1244,11 @@ export default function Home() {
           {cloudError && <div className="cloud-banner cloud-warning">{cloudError}</div>}
           {actionError && <div className="cloud-banner cloud-error" role="alert">{actionError}</div>}
           {cloudLoading && <div className="dashboard-sync-indicator"><span className="sync-pulse" /> {language === "en" ? "Syncing fleet data" : "Synchronisation des données de flotte"}</div>}
+          <button className="mobile-nav-toggle" type="button" onClick={() => setMobileNavOpen((open) => !open)} aria-expanded={mobileNavOpen} aria-label={t("chooseSection")}><span>☰</span><b>{t("section")}</b></button>
+          {mobileNavOpen && <div className="mobile-nav-drawer" role="dialog" aria-label={t("workspace")}><div className="mobile-nav-drawer-header"><b>{t("workspace")}</b><button type="button" onClick={() => setMobileNavOpen(false)} aria-label={t("close")}>×</button></div>{visibleNavItems.map((item) => <button key={item.id} type="button" className={`mobile-drawer-item ${section === item.id ? "mobile-drawer-active" : ""}`} onClick={() => { setSection(item.id); setMobileNavOpen(false); }}><span>{item.icon}</span>{t(item.label)}</button>)}</div>}
           <div className="mobile-nav-select">
             <span className="mobile-nav-label">{t("section")}</span>
-            <select value={section} onChange={(event) => setSection(event.target.value as Section)} aria-label={t("chooseSection")}>
+            <select value={section} onChange={(event) => { setSection(event.target.value as Section); setMobileNavOpen(false); }} aria-label={t("chooseSection")}>
               {visibleNavItems.map((item) => <option key={item.id} value={item.id}>{t(item.label)}</option>)}
             </select>
           </div>
@@ -2258,7 +2268,7 @@ export default function Home() {
                   >
                     {t("cancel")}
                   </button>
-                  <button type="submit" className="primary-button">
+                  <button type="submit" disabled={submitting} className="primary-button">
                     {modal === "job" ? t("createWorkOrder") : t("saveUnit")}
                   </button>
                 </div>
