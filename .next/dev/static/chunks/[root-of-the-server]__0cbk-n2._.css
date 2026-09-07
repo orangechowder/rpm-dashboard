@@ -462,6 +462,178 @@
   --muted: #8b96a6;
   --line: #e6eaf0;
   --red: #dc2626;
+  --surface-raised: #fff;
+  --surface-soft: #fbfcfe;
+  --line-strong: #dbe2eb;
+  --shadow-soft: 0 10px 28px #1720330f,0 2px 7px #1720330a;
+  --shadow-modal: 0 24px 70px #1720333d,0 4px 14px #17203314;
+}
+
+button, a, input, select, textarea, .section-card, .metric-card, .client-card, .mobile-job-card, .unit-row, .modal-card, .punch-clock, .line-item, .note-item {
+  transition: border-color .18s, background-color .18s, color .18s, box-shadow .18s, transform .18s, opacity .18s;
+}
+
+button:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+button:not(:disabled):active {
+  transform: translateY(0)scale(.98);
+}
+
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline-offset: 2px;
+  outline: 3px solid #dc262629;
+}
+
+.section-card, .metric-card, .client-card, .mobile-job-card, .punch-clock {
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-soft);
+}
+
+.section-card:hover, .metric-card:hover, .client-card:hover, .mobile-job-card:hover {
+  border-color: #c5cfdb;
+  box-shadow: 0 14px 34px #17203317, 0 3px 9px #1720330d;
+}
+
+.primary-button, .danger-button, .punch-button, .outline-button, .history-button {
+  min-height: 34px;
+}
+
+.primary-button, .punch-in {
+  box-shadow: 0 5px 12px #dc26262e;
+}
+
+.status-pill, .time-status, .user-status, .pm-toggle {
+  border: 1px solid #0000;
+  box-shadow: inset 0 1px #ffffffa6;
+}
+
+.status-blue {
+  color: #3575c4;
+  background: #edf4ff;
+  border-color: #cfe0fb;
+}
+
+.status-amber {
+  color: #a67825;
+  background: #fff8e8;
+  border-color: #f5dfaa;
+}
+
+.status-purple {
+  color: #8050b8;
+  background: #f5efff;
+  border-color: #e3d3fb;
+}
+
+.status-green, .time-completed {
+  color: #2b9862;
+  background: #eaf9f0;
+  border-color: #c8ead7;
+}
+
+.time-active {
+  border-color: #b7dec5;
+  box-shadow: 0 0 0 3px #2b986214;
+}
+
+.pm-needed {
+  border-color: #fecaca;
+  box-shadow: 0 0 0 3px #dc26260f;
+}
+
+.modal-backdrop {
+  -webkit-backdrop-filter: blur(8px);
+  background: #0f172a8f;
+  animation: .18s both overlay-in;
+}
+
+.modal-card {
+  box-shadow: var(--shadow-modal);
+  animation: .22s cubic-bezier(.2, .8, .2, 1) both modal-in;
+}
+
+.modal-header {
+  gap: 16px;
+}
+
+.modal-fields, .detail-controls {
+  row-gap: 17px;
+}
+
+.dashboard-sync-indicator {
+  color: #5b7695;
+  background: #f5f9ff;
+  border: 1px solid #dbe7f5;
+  border-radius: 999px;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  margin: -10px 0 18px;
+  padding: 7px 10px;
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+}
+
+.sync-pulse {
+  background: #3780db;
+  border-radius: 50%;
+  width: 7px;
+  height: 7px;
+  animation: 1.5s ease-in-out infinite sync-pulse;
+  box-shadow: 0 0 0 4px #3780db1f;
+}
+
+.cloud-banner {
+  box-shadow: var(--shadow-soft);
+}
+
+.punch-history-section, .line-item-entry, .manual-time-card {
+  background: linear-gradient(#fff 0%, #fbfcfe 100%);
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px)scale(.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0)scale(1);
+  }
+}
+
+@keyframes sync-pulse {
+  0%, 100% {
+    opacity: .5;
+    transform: scale(.9);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, :before, :after {
+    transition-duration: .01ms !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
 
 .punch-history-section {
@@ -1135,6 +1307,42 @@ button {
   opacity: .45;
 }
 
+.admin-active-punches {
+  gap: 6px;
+  margin-top: 10px;
+  display: grid;
+}
+
+.admin-active-punch {
+  background: #f4fbf6;
+  border: 1px solid #dbeadf;
+  border-radius: 5px;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  display: flex;
+}
+
+.admin-active-punch span {
+  gap: 3px;
+  display: grid;
+}
+
+.admin-active-punch strong {
+  color: #344055;
+  font-size: 10px;
+}
+
+.admin-active-punch small {
+  color: #2b9862;
+  font-size: 9px;
+}
+
+.admin-active-punch .punch-button {
+  height: 30px;
+}
+
 .emergency-button {
   background: var(--red);
   color: #fff;
@@ -1602,11 +1810,19 @@ button {
 }
 
 .cloud-banner {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   border-radius: 6px;
+  width: 100%;
+  max-width: none;
+  min-height: 40px;
   margin-bottom: 18px;
   padding: 11px 14px;
   font-size: 11px;
   font-weight: 700;
+  line-height: 1.5;
+  display: block;
 }
 
 .cloud-warning {
