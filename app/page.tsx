@@ -13,6 +13,7 @@ type Note = { id: string; text: string; author: string; createdAt: string };
 type LineItem = {
   id: string;
   kind: "Labor" | "Part";
+  partNumber: string;
   description: string;
   quantity: number;
   amount: number;
@@ -27,6 +28,7 @@ type Job = {
   issue: string;
   updated: string;
   usage: string;
+  meterReading?: number | null;
   notes?: Note[];
   lineItems?: LineItem[];
 };
@@ -39,6 +41,10 @@ type Unit = {
   due: string;
   overdue: boolean;
   usage: string;
+  currentMeter?: number | null;
+  lastPmMeter?: number | null;
+  pmInterval?: number;
+  meterUnit?: "KM" | "HRS";
 };
 
 const jobs: Job[] = [
@@ -251,7 +257,7 @@ function MetricCard({
           <p className="eyebrow">{label}</p>
           <p className="metric-number">{value}</p>
         </div>
-        <span className={`metric-icon metric-${tone}`}>{icon}</span>
+        <span className={`metric-icon metric-${tone} ${icon === "unit" ? "metric-unit-icon" : ""}`}>{icon === "unit" ? null : icon}</span>
       </div>
       <p className="metric-detail">{detail}</p>
     </div>
@@ -268,7 +274,7 @@ function PunchClock({ activeEntry, jobs, language, onClockIn, onClockOut }: { ac
   }, [activeEntry]);
   const elapsed = activeEntry ? Math.max(0, now - new Date(activeEntry.clockIn).getTime()) : 0;
   const elapsedLabel = `${String(Math.floor(elapsed / 3600000)).padStart(2, "0")}:${String(Math.floor((elapsed % 3600000) / 60000)).padStart(2, "0")}:${String(Math.floor((elapsed % 60000) / 1000)).padStart(2, "0")}`;
-  return <div className={`punch-clock ${activeEntry ? "punch-active" : ""}`}><span className="punch-indicator" /><div className="punch-copy"><strong>{activeEntry ? (language === "en" ? "On the clock" : "Pointé") : (language === "en" ? "Off the clock" : "Non pointé")}</strong><small>{activeEntry ? elapsedLabel : (language === "en" ? "Ready to start" : "Prêt à commencer")}</small></div>{!activeEntry ? <><select value={workOrderId} onChange={(event) => setWorkOrderId(event.target.value)} aria-label={language === "en" ? "Assign work order" : "Assigner un ordre de travail"}><option value="">{language === "en" ? "No work order" : "Aucun ordre"}</option>{jobs.filter((job) => job.status !== "Completed").map((job) => <option key={job.id} value={job.id}>{job.unit} · {job.issue}</option>)}</select><button className="punch-button punch-in" onClick={() => onClockIn(workOrderId || null)}>{language === "en" ? "Clock In" : "Pointer"}</button></> : <button className="punch-button punch-out" onClick={onClockOut}>{language === "en" ? "Clock Out" : "Dépointer"}</button>}</div>;
+  return <div className={`punch-clock ${activeEntry ? "punch-active" : ""}`}><span className="punch-indicator" /><div className="punch-copy"><strong>{activeEntry ? (language === "en" ? "On the clock" : "Pointé") : (language === "en" ? "Off the clock" : "Non pointé")}</strong><small>{activeEntry ? elapsedLabel : (language === "en" ? "Select a work order first" : "Sélectionnez d'abord un ordre")}</small></div>{!activeEntry ? <><select required value={workOrderId} onChange={(event) => setWorkOrderId(event.target.value)} aria-label={language === "en" ? "Assign work order" : "Assigner un ordre de travail"}><option value="">{language === "en" ? "Select work order" : "Sélectionner un ordre"}</option>{jobs.filter((job) => job.status !== "Completed").map((job) => <option key={job.id} value={job.id}>{job.unit} · {job.issue}</option>)}</select><button disabled={!workOrderId} className="punch-button punch-in" onClick={() => onClockIn(workOrderId)}>{language === "en" ? "Clock In" : "Pointer"}</button></> : <button className="punch-button punch-out" onClick={onClockOut}>{language === "en" ? "Clock Out" : "Dépointer"}</button>}</div>;
 }
 
 export default function Home() {
@@ -301,6 +307,7 @@ export default function Home() {
   const [editingClient, setEditingClient] = useState<string | null>(null);
   const [editingClientName, setEditingClientName] = useState("");
   const [modal, setModal] = useState<"job" | "unit" | "detail" | "history" | null>(null);
+  const [completionPrompt, setCompletionPrompt] = useState<{ job: Job; reading: string } | null>(null);
   const [historyUnit, setHistoryUnit] = useState<Unit | null>(null);
   const [detailJobId, setDetailJobId] = useState<string | null>(null);
   const [editingUnitId, setEditingUnitId] = useState<string | null>(null);
@@ -313,6 +320,10 @@ export default function Home() {
     issue: "",
     service: "",
     usage: "",
+    meterReading: "",
+    currentMeter: "",
+    pmInterval: "25000",
+    meterUnit: "KM" as Unit["meterUnit"],
     tech: "Unassigned",
     priority: "Normal" as Job["priority"],
     status: "In Progress" as JobStatus,
@@ -320,6 +331,7 @@ export default function Home() {
   const [noteText, setNoteText] = useState("");
   const [lineItem, setLineItem] = useState({
     kind: "Part" as LineItem["kind"],
+    partNumber: "",
     description: "",
     quantity: "1",
     amount: "",
@@ -348,6 +360,7 @@ export default function Home() {
   const [editingTimeEntryId, setEditingTimeEntryId] = useState<string | null>(null);
   const [editingTimeEntry, setEditingTimeEntry] = useState<CloudTimeEntry | null>(null);
   const [unitData, setUnitData] = useState<Unit[]>(units);
+  const [meterOverrides, setMeterOverrides] = useState<Record<string, Pick<Unit, "currentMeter" | "lastPmMeter" | "pmInterval" | "meterUnit">>>(() => loadStored("rpm-diesel-meter-overrides", {}));
   const [jobData, setJobData] = useState<Job[]>(jobs);
   const [timeEntries, setTimeEntries] = useState<CloudTimeEntry[]>([]);
   const [cloudReady, setCloudReady] = useState(!hasSupabaseConfig);
@@ -357,7 +370,36 @@ export default function Home() {
   const remoteUsersUpdate = useRef(false);
   const cloudPollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const cloudRefreshInFlight = useRef(false);
-  const t = (key: string) => translations[language][key] ?? (key === "day" ? language === "en" ? "Day" : "Jour" : key);
+  const t = (key: string) => translations[language][key] ?? ({
+    day: language === "en" ? "Day" : "Jour",
+    partNumber: language === "en" ? "Part number" : "Numéro de pièce",
+    adminPendingEstimates: language === "en" ? "Pending estimates require review." : "Des estimations en attente doivent être vérifiées.",
+    adminPendingParts: language === "en" ? "Check the reception of pending parts." : "Vérifiez la réception des pièces en attente.",
+    reviewEstimates: language === "en" ? "Review estimates →" : "Vérifier les estimations →",
+    reviewParts: language === "en" ? "Review parts →" : "Vérifier les pièces →",
+    onTheClock: language === "en" ? "On the clock" : "Pointé",
+    offTheClock: language === "en" ? "Off the clock" : "Non pointé",
+    selectWorkOrderFirst: language === "en" ? "Select a work order first" : "Sélectionnez d'abord un ordre",
+    selectWorkOrder: language === "en" ? "Select work order" : "Sélectionner un ordre",
+    clockIn: language === "en" ? "Clock In" : "Pointer",
+    clockOut: language === "en" ? "Clock Out" : "Dépointer",
+    clockInThisWorkOrder: language === "en" ? "Clock In on this work order" : "Pointer sur cet ordre",
+    addTechnicianTime: language === "en" ? "Add technician time manually" : "Ajouter du temps technicien manuellement",
+    hoursDecimal: language === "en" ? "Hours (decimal)" : "Heures (décimal)",
+    closingMeterReading: language === "en" ? "Closing meter reading" : "Lecture du compteur de fermeture",
+    enterCurrentMeter: language === "en" ? "Enter the current meter before completing this work order." : "Entrez le compteur actuel avant de compléter cet ordre.",
+    finalMeterReading: language === "en" ? "Final meter reading" : "Lecture finale du compteur",
+    completeWorkOrder: language === "en" ? "Complete work order" : "Compléter l'ordre",
+    meterType: language === "en" ? "Meter type" : "Type de compteur",
+    currentMileageHours: language === "en" ? "Current mileage / hours" : "Kilométrage / heures actuels",
+    pmIntervalLabel: language === "en" ? "PM interval" : "Intervalle PM",
+    pmIntervalExceeded: language === "en" ? "PM interval exceeded" : "Intervalle PM dépassé",
+    sinceLastPm: language === "en" ? "since last PM" : "depuis le dernier PM",
+    quantity: language === "en" ? "Qty" : "Qté",
+    addAnItem: language === "en" ? "Add an item" : "Ajouter un article",
+    pmDue: language === "en" ? "PM Due" : "PM requis",
+    addPmService: language === "en" ? "Add PM service" : "Ajouter le service PM",
+  }[key] ?? key);
   const todayLabel = new Intl.DateTimeFormat(language === "fr" ? "fr-CA" : "en-CA", { dateStyle: "medium" }).format(new Date());
   const formatCurrency = (amount: number) => new Intl.NumberFormat(language === "fr" ? "fr-CA" : "en-CA", {
     style: "currency",
@@ -405,7 +447,7 @@ export default function Home() {
   };
   const activeTimeEntry = timeEntries.find((entry) => entry.userId === activeUser && entry.status === "active");
   const clockIn = async (workOrderId: string | null) => {
-    if (!activeUser || activeTimeEntry) return;
+    if (!activeUser || activeTimeEntry || !workOrderId) return;
     try {
       const created = await createTimeEntry({ userId: activeUser, userName: activeUser, workOrderId, clockIn: new Date().toISOString() });
       if (created) setTimeEntries((current) => [created, ...current]);
@@ -449,6 +491,7 @@ export default function Home() {
     }
   };
   const deleteTimeEntry = async (entryId: string) => {
+    if (!isAdmin || !confirmDeletion("punch")) return;
     try {
       await removeTimeEntry(entryId);
       setTimeEntries((current) => current.filter((entry) => entry.id !== entryId));
@@ -460,8 +503,16 @@ export default function Home() {
       setCloudError(`Time entry deletion failed: ${(error as Error).message}`);
     }
   };
-  const visibleNavItems = activeUser === "Marc" ? [...navItems, { id: "users" as Section, label: "userManagement", icon: "♙" }] : navItems;
-  const canManageWorkOrders = activeUser === "Marc";
+  const currentAccount = userAccounts.find((account) => account.name === activeUser);
+  const isAdmin = currentAccount?.role === "Admin";
+  const confirmDeletion = (kind: "workOrder" | "unit" | "client" | "punch" | "user") => {
+    const labels = language === "fr"
+      ? { workOrder: "cet ordre de travail", unit: "cette unité", client: "ce client", punch: "ce poinçon", user: "cet utilisateur" }
+      : { workOrder: "this work order", unit: "this unit", client: "this client", punch: "this punch entry", user: "this user" };
+    return window.confirm(language === "fr" ? `Voulez-vous vraiment supprimer ${labels[kind]} ?` : `Are you sure you want to delete ${labels[kind]}?`);
+  };
+  const visibleNavItems = isAdmin ? [...navItems, { id: "users" as Section, label: "userManagement", icon: "♙" }] : navItems;
+  const canManageWorkOrders = isAdmin;
   const technicianOptions = ["Unassigned", ...userAccounts.filter((account) => account.active && account.isTechnician).map((account) => account.name)];
   const addUser = () => {
     const name = newUserName.trim();
@@ -471,16 +522,30 @@ export default function Home() {
     setNewUserPassword("12345678");
     setNewUserIsTechnician(true);
   };
-  const toggleUser = (id: string) => setUserAccounts((current) => current.map((account) => account.id === id ? { ...account, active: !account.active } : account));
+  const toggleUser = (id: string) => setUserAccounts((current) => current.map((account) => account.id === id && account.name !== activeUser ? { ...account, active: !account.active } : account));
   const toggleTechnician = (id: string) => setUserAccounts((current) => current.map((account) => account.id === id ? { ...account, isTechnician: !account.isTechnician } : account));
+  const toggleAdminRole = (id: string) => {
+    if (!isAdmin) return;
+    const nextUsers: UserAccount[] = userAccounts.map((account) => account.id === id && account.name !== "Marc" && account.name !== activeUser
+      ? { ...account, role: (account.role === "Admin" ? "Technician" : "Admin") as UserAccount["role"], isTechnician: true }
+      : account);
+    setUserAccounts(nextUsers);
+    void saveUsers(nextUsers).catch((error: Error) => setCloudError(`User role update failed: ${error.message}`));
+  };
   const saveManagedPassword = () => {
     if (!passwordTargetId || managedPassword.length < 8) return;
     setUserAccounts((current) => current.map((account) => account.id === passwordTargetId ? { ...account, password: managedPassword } : account));
     setPasswordTargetId(null);
     setManagedPassword("12345678");
   };
-  const removeUser = (id: string) => setUserAccounts((current) => current.filter((account) => account.id !== id || account.name === "Marc"));
+  const removeUser = (id: string) => {
+    if (!isAdmin) return;
+    const account = userAccounts.find((candidate) => candidate.id === id);
+    if (!account || account.name === "Marc" || account.name === activeUser || !confirmDeletion("user")) return;
+    setUserAccounts((current) => current.filter((candidate) => candidate.id !== id));
+  };
   const saveClientEdit = () => {
+    if (!isAdmin) return;
     const nextName = editingClientName.trim();
     if (!editingClient || !nextName) return;
     setClientData((current) => current.map((client) => client === editingClient ? nextName : client));
@@ -488,6 +553,7 @@ export default function Home() {
     setEditingClientName("");
   };
   const removeClient = (client: string) => {
+    if (!isAdmin || !confirmDeletion("client")) return;
     setClientData((current) => current.filter((item) => item !== client));
   };
   const addClient = (input: HTMLInputElement) => {
@@ -511,6 +577,9 @@ export default function Home() {
     window.localStorage.setItem("rpm-diesel-clients", JSON.stringify(clientData));
   }, [clientData]);
   useEffect(() => {
+    window.localStorage.setItem("rpm-diesel-meter-overrides", JSON.stringify(meterOverrides));
+  }, [meterOverrides]);
+  useEffect(() => {
     let cancelled = false;
     if (!hasSupabaseConfig) return;
     Promise.all([loadFleetData(), loadUsers(), loadTimeEntries()]).then(([data, cloudUsers, cloudTimeEntries]) => {
@@ -519,7 +588,7 @@ export default function Home() {
         remoteJobsUpdate.current = true;
         remoteUnitsUpdate.current = true;
         setJobData(data.jobs as Job[]);
-        setUnitData(data.units as Unit[]);
+        setUnitData((data.units as Unit[]).map((unit) => ({ ...unit, ...(meterOverrides[unit.unit] ?? {}) })));
       }
       if (cloudUsers?.length) { remoteUsersUpdate.current = true; setUserAccounts(cloudUsers as UserAccount[]); }
       if (cloudTimeEntries) setTimeEntries(cloudTimeEntries);
@@ -530,7 +599,7 @@ export default function Home() {
       setCloudReady(true);
     });
     return () => { cancelled = true; };
-  }, [activeUser]);
+  }, [activeUser, meterOverrides]);
   useEffect(() => {
     if (!cloudReady || remoteUsersUpdate.current) { remoteUsersUpdate.current = false; return; }
     void saveUsers(userAccounts);
@@ -583,7 +652,7 @@ export default function Home() {
         remoteJobsUpdate.current = true;
         remoteUnitsUpdate.current = true;
         setJobData(data.jobs as Job[]);
-        setUnitData(data.units as Unit[]);
+        setUnitData((data.units as Unit[]).map((unit) => ({ ...unit, ...(meterOverrides[unit.unit] ?? {}) })));
         if (cloudUsers?.length) { remoteUsersUpdate.current = true; setUserAccounts(cloudUsers as UserAccount[]); }
         if (cloudTimeEntries) setTimeEntries(cloudTimeEntries);
         setCloudError(null);
@@ -623,7 +692,7 @@ export default function Home() {
       if (cloudPollTimer.current) clearInterval(cloudPollTimer.current);
       cloudPollTimer.current = null;
     };
-  }, [cloudReady, activeUser]);
+  }, [cloudReady, activeUser, meterOverrides]);
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
       if (event.key === "rpm-diesel-session") {
@@ -680,7 +749,6 @@ export default function Home() {
     ? jobData.find((job) => job.id === detailJobId)
     : undefined;
   const workedHoursFor = (workOrderId: string) => timeEntries.filter((entry) => entry.workOrderId === workOrderId && entry.totalHours != null).reduce((total, entry) => total + (entry.totalHours ?? 0), 0).toFixed(2);
-  const currentAccount = userAccounts.find((account) => account.name === activeUser);
   const punchDayKey = (iso: string) => {
     const date = new Date(iso);
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -735,6 +803,11 @@ export default function Home() {
   };
   const setStatus = (id: string, status: JobStatus) => {
     const job = jobData.find((item) => item.id === id);
+    if (job && status === "Completed" && job.status !== "Completed") {
+      setDetailJobId(id);
+      setCompletionPrompt({ job, reading: job.meterReading == null ? "" : String(job.meterReading) });
+      return;
+    }
     if (job) syncUnitFromJob(job, status);
     if (job) void writeActivityLog(activeUser ?? "Unknown", "status_changed", "work_order", id, { status });
     if (!job) return;
@@ -757,6 +830,10 @@ export default function Home() {
       issue: "",
       service: "",
       usage: "",
+      meterReading: "",
+      currentMeter: "",
+      pmInterval: "25000",
+      meterUnit: "KM",
       tech: "Unassigned",
       priority: "Normal",
       status: "In Progress",
@@ -768,7 +845,7 @@ export default function Home() {
   const openJobDetails = (job: Job) => {
     setDetailJobId(job.id);
     setNoteText("");
-    setLineItem({ kind: "Labor", description: "", quantity: "1", amount: "" });
+    setLineItem({ kind: "Part", partNumber: "", description: "", quantity: "1", amount: "" });
     setModal("detail");
   };
   const openUnitEditor = (unit: Unit) => {
@@ -782,6 +859,10 @@ export default function Home() {
       issue: "",
       service: unit.service,
       usage: unit.usage,
+      meterReading: "",
+      currentMeter: unit.currentMeter == null ? "" : String(unit.currentMeter),
+      pmInterval: String(unit.pmInterval),
+      meterUnit: unit.meterUnit,
       tech: "Unassigned",
       priority: "Normal",
       status: "In Progress",
@@ -804,6 +885,8 @@ export default function Home() {
       unit: value,
       client: selectedUnit?.client ?? "",
       usage: selectedUnit?.usage ?? "",
+      meterReading: selectedUnit?.currentMeter == null ? "" : String(selectedUnit.currentMeter),
+      meterUnit: selectedUnit?.meterUnit ?? current.meterUnit,
     }));
   };
   const saveNote = () => {
@@ -849,11 +932,12 @@ export default function Home() {
       ),
     );
   const saveLineItem = () => {
-    if (!detailJobId || !lineItem.description.trim() || !lineItem.amount)
+    if (!detailJobId || !lineItem.description.trim())
       return;
     const item: LineItem = {
       id: createId(),
       kind: "Part",
+      partNumber: lineItem.partNumber.trim(),
       description: lineItem.description.trim(),
       quantity: Number(lineItem.quantity) || 1,
       amount: Number(lineItem.amount) || 0,
@@ -869,7 +953,7 @@ export default function Home() {
           : job,
       ),
     );
-    setLineItem({ kind: "Part", description: "", quantity: "1", amount: "" });
+    setLineItem({ kind: "Part", partNumber: "", description: "", quantity: "1", amount: "" });
   };
   const updateLineItem = (
     itemId: string,
@@ -916,6 +1000,10 @@ export default function Home() {
     if (!detailJobId) return;
     const job = jobData.find((item) => item.id === detailJobId);
     if (!job) return;
+    if (field === "status" && value === "Completed" && job.status !== "Completed") {
+      setCompletionPrompt({ job, reading: job.meterReading == null ? "" : String(job.meterReading) });
+      return;
+    }
     if (field === "status" || field === "usage")
       syncUnitFromJob(
         job,
@@ -924,8 +1012,23 @@ export default function Home() {
       );
     updateJobRecord(job, field, value);
   };
+  const completeJobWithMeter = async () => {
+    if (!completionPrompt) return;
+    const reading = Number(completionPrompt.reading);
+    if (!Number.isFinite(reading) || reading < 0) return;
+    const updatedJob = { ...completionPrompt.job, status: "Completed" as JobStatus, meterReading: reading, updated: "Just now" };
+    setJobData((current) => current.map((item) => item.id === updatedJob.id ? updatedJob : item));
+    const unit = unitData.find((item) => item.unit === updatedJob.unit);
+    if (unit) setUnitData((current) => current.map((item) => item.unit === unit.unit ? { ...item, currentMeter: reading, overdue: reading - (item.lastPmMeter ?? item.currentMeter ?? reading) >= (item.pmInterval ?? 25000) } : item));
+    await saveJobs([updatedJob]);
+    setCompletionPrompt(null);
+  };
+  const addPmServiceLine = () => {
+    if (!detailJobId) return;
+    setJobData((current) => current.map((job) => job.id === detailJobId ? { ...job, lineItems: [...(job.lineItems ?? []), { id: createId(), kind: "Labor", partNumber: "PM", description: "Preventive maintenance service", quantity: 1, amount: 0 }], updated: "Just now" } : job));
+  };
   const deleteJob = (id: string) => {
-    if (!canManageWorkOrders) return;
+    if (!canManageWorkOrders || !confirmDeletion("workOrder")) return;
     setJobData((current) => current.filter((job) => job.id !== id));
     void removeJob(id);
     void writeActivityLog(activeUser ?? "Unknown", "deleted", "work_order", id);
@@ -933,6 +1036,7 @@ export default function Home() {
     setDetailJobId(null);
   };
   const deleteUnit = (unitId: string) => {
+    if (!isAdmin || !confirmDeletion("unit")) return;
     setUnitData((current) => current.filter((unit) => unit.unit !== unitId));
     void removeUnit(unitId);
     void writeActivityLog(activeUser ?? "Unknown", "deleted", "unit", unitId);
@@ -948,6 +1052,10 @@ export default function Home() {
   const submitForm = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (modal === "job") {
+      if (!form.meterReading.trim() || !form.unit) {
+        setCloudError(language === "en" ? "Opening meter reading is required." : "La lecture du compteur à l'ouverture est obligatoire.");
+        return;
+      }
       const newJob: Job = {
         id: `WO-${Date.now()}-${createId().slice(0, 8)}`,
         unit: form.unit,
@@ -958,6 +1066,7 @@ export default function Home() {
         issue: form.issue,
         updated: "Just now",
         usage: form.usage,
+        meterReading: Number(form.meterReading),
         notes: [],
         lineItems: [],
       };
@@ -968,6 +1077,15 @@ export default function Home() {
         return;
       }
       setJobData((current) => [newJob, ...current]);
+      const openingMeter = Number(form.meterReading);
+      const linkedUnit = unitData.find((unit) => unit.unit === newJob.unit);
+      if (linkedUnit && Number.isFinite(openingMeter)) {
+        const pmBaseline = linkedUnit.lastPmMeter ?? linkedUnit.currentMeter ?? openingMeter;
+        const pmOverdue = openingMeter - pmBaseline >= (linkedUnit.pmInterval ?? 25000);
+        const updatedUnit = { ...linkedUnit, currentMeter: openingMeter, overdue: pmOverdue };
+        setUnitData((current) => current.map((unit) => unit.unit === updatedUnit.unit ? updatedUnit : unit));
+        setMeterOverrides((current) => ({ ...current, [updatedUnit.unit]: { currentMeter: updatedUnit.currentMeter, lastPmMeter: updatedUnit.lastPmMeter, pmInterval: updatedUnit.pmInterval, meterUnit: updatedUnit.meterUnit } }));
+      }
       syncUnitFromJob(newJob, newJob.status, newJob.usage);
       void writeActivityLog(activeUser ?? "Unknown", "created", "work_order", newJob.id, { unit: newJob.unit });
       setSection("jobs");
@@ -981,8 +1099,13 @@ export default function Home() {
         service: form.service || "Not serviced yet",
         due: "Schedule PM",
         overdue: false,
-        usage: form.usage,
+        usage: form.currentMeter ? `${form.currentMeter} ${form.meterUnit}` : "Not recorded",
+        currentMeter: form.currentMeter ? Number(form.currentMeter) : null,
+        lastPmMeter: form.currentMeter ? Number(form.currentMeter) : null,
+        pmInterval: Number(form.pmInterval) || 25000,
+        meterUnit: form.meterUnit,
       };
+      setMeterOverrides((current) => ({ ...current, [newUnit.unit]: { currentMeter: newUnit.currentMeter, lastPmMeter: newUnit.lastPmMeter, pmInterval: newUnit.pmInterval, meterUnit: newUnit.meterUnit } }));
       try {
         if (editingUnitId) {
           await saveUnits([newUnit]);
@@ -1133,14 +1256,24 @@ export default function Home() {
                 </div>
                 <button onClick={() => setSection("punch")}>{language === "en" ? "Review punches →" : "Vérifier les poinçons →"}</button>
               </div>}
-              <div className="alert-banner">
+              {isAdmin && jobData.filter((job) => job.status === "Waiting on Estimates").length > 0 && <div className="alert-banner alert-danger">
+                <span className="alert-icon">!</span>
+                <div><b>{jobData.filter((job) => job.status === "Waiting on Estimates").length} {t("adminPendingEstimates")}</b></div>
+                <button onClick={() => { setJobFilter("Waiting on Estimates"); setSection("jobs"); }}>{t("reviewEstimates")}</button>
+              </div>}
+              {isAdmin && jobData.filter((job) => job.status === "Waiting on Parts").length > 0 && <div className="alert-banner alert-danger">
+                <span className="alert-icon">!</span>
+                <div><b>{jobData.filter((job) => job.status === "Waiting on Parts").length} {t("adminPendingParts")}</b></div>
+                <button onClick={() => { setJobFilter("Waiting on Parts"); setSection("jobs"); }}>{t("reviewParts")}</button>
+              </div>}
+              {unitData.filter((unit) => unit.overdue).length > 0 && <div className="alert-banner">
                 <span className="alert-icon">!</span>
                 <div>
                   <b>{unitData.filter((unit) => unit.overdue).length} {t("overduePm")}</b>
                   <span>{language === "en" ? " Schedule service before they go back on the road." : " Planifiez le service avant leur retour sur la route."}</span>
                 </div>
                 <button onClick={() => setSection("units")}>{t("reviewUnits")}</button>
-              </div>
+              </div>}
               <section className="metrics-grid">
                 <div className="section-card metric-group">
                   <div className="card-heading">
@@ -1295,7 +1428,7 @@ export default function Home() {
               <div className="toolbar"><div><p className="card-kicker">{t("punchClock")}</p><h2>{t("punchClock")}</h2></div></div>
               <p className="punch-page-copy">{t("punchSubtitle")}</p>
               <PunchClock activeEntry={activeTimeEntry} jobs={jobData} language={language} onClockIn={clockIn} onClockOut={clockOut} />
-              {canManageWorkOrders && <div className="manual-time-card"><div className="detail-section-heading"><h3>{language === "en" ? "Add technician time manually" : "Ajouter du temps technicien manuellement"}</h3></div><div className="manual-time-form"><select value={manualTimeUser} onChange={(event) => setManualTimeUser(event.target.value)} aria-label={t("technician")}><option value="">{language === "en" ? "Select technician" : "Sélectionner un technicien"}</option>{userAccounts.filter((account) => account.active && account.isTechnician).map((account) => <option key={account.id} value={account.name}>{account.name}</option>)}</select><select value={manualTimeJob} onChange={(event) => setManualTimeJob(event.target.value)} aria-label={t("workOrder")}><option value="">{language === "en" ? "No work order" : "Aucun ordre"}</option>{jobData.filter((job) => job.status !== "Completed").map((job) => <option key={job.id} value={job.id}>{job.unit} · {job.issue}</option>)}</select><input type="number" min="0.01" step="0.01" value={manualTimeHours} onChange={(event) => setManualTimeHours(event.target.value)} placeholder={language === "en" ? "Hours (decimal)" : "Heures (décimal)"} aria-label={language === "en" ? "Hours" : "Heures"} /><button className="primary-button" onClick={addManualTime}>{language === "en" ? "Add time" : "Ajouter le temps"}</button></div></div>}
+              {canManageWorkOrders && <div className="manual-time-card"><div className="detail-section-heading"><h3>{t("addTechnicianTime")}</h3></div><div className="manual-time-form"><select value={manualTimeUser} onChange={(event) => setManualTimeUser(event.target.value)} aria-label={t("technician")}><option value="">{t("technician")}</option>{userAccounts.filter((account) => account.active && account.isTechnician).map((account) => <option key={account.id} value={account.name}>{account.name}</option>)}</select><select value={manualTimeJob} onChange={(event) => setManualTimeJob(event.target.value)} aria-label={t("workOrder")}><option value="">{t("noData")}</option>{jobData.filter((job) => job.status !== "Completed").map((job) => <option key={job.id} value={job.id}>{job.unit} · {job.issue}</option>)}</select><input type="number" min="0.01" step="0.01" value={manualTimeHours} onChange={(event) => setManualTimeHours(event.target.value)} placeholder={t("hoursDecimal")} aria-label={t("hoursDecimal")} /><button className="primary-button" onClick={addManualTime}>{t("add")}</button></div></div>}
               <div className="punch-history-section">
                 <select className="punch-period-select punch-period-select-all" value={punchPeriod} onChange={(event) => setPunchPeriod(event.target.value as "day" | "week" | "month")} aria-label={t("punchHistory")}><option value="day">{t("day")}</option><option value="week">{t("week")}</option><option value="month">{t("month")}</option></select>
                 <div className="detail-section-heading punch-history-heading"><div><h3>{t("punchHistory")}</h3><span>{periodTimeEntries.length} {t("entries")} · {periodStart.toLocaleDateString(language === "fr" ? "fr-CA" : "en-CA")} - {new Date(periodEnd.getTime() - 86400000).toLocaleDateString(language === "fr" ? "fr-CA" : "en-CA")}</span></div><div className="punch-period-controls"><button type="button" className="period-nav-button" onClick={() => { const next = new Date(`${punchAnchorDate}T12:00:00`); if (punchPeriod === "week") next.setDate(next.getDate() - 7); else next.setMonth(next.getMonth() - 1); setPunchAnchorDate(next.toISOString().slice(0, 10)); }} aria-label={t("previousPeriod")}>‹</button><input className="punch-date-picker" type="date" value={punchAnchorDate} onChange={(event) => setPunchAnchorDate(event.target.value)} aria-label={t("chooseDate")} /><button type="button" className="period-nav-button" onClick={() => { const next = new Date(`${punchAnchorDate}T12:00:00`); if (punchPeriod === "week") next.setDate(next.getDate() + 7); else next.setMonth(next.getMonth() + 1); setPunchAnchorDate(next.toISOString().slice(0, 10)); }} aria-label={t("nextPeriod")}>›</button><select className="punch-period-select" value={punchPeriod} onChange={(event) => setPunchPeriod(event.target.value as "week" | "month")} aria-label={t("punchHistory")}><option value="week">{t("week")}</option><option value="month">{t("month")}</option></select><button type="button" className="period-today-button" onClick={() => setPunchAnchorDate(new Date().toISOString().slice(0, 10))}>{t("currentPeriod")}</button></div></div>
@@ -1319,9 +1452,10 @@ export default function Home() {
                 <button className="primary-button" onClick={(event) => { const input = event.currentTarget.previousElementSibling; if (input instanceof HTMLInputElement) addClient(input); }}>{t("addClient")}</button>
               </div>
               <div className="client-grid">{filteredClients.map((client) => <div className="client-card" key={client}><span className="client-initial">{client.slice(0, 1).toUpperCase()}</span>{editingClient === client ? <div className="client-edit-form"><input value={editingClientName} onChange={(event) => setEditingClientName(event.target.value)} autoFocus /><div><button className="primary-button" onClick={saveClientEdit}>{t("save")}</button><button className="outline-button" onClick={() => setEditingClient(null)}>{t("cancel")}</button></div></div> : <><div className="client-card-copy"><strong>{client}</strong><small>{t("fleetClient")}</small></div>{activeUser === "Marc" && <div className="client-actions"><button className="row-action" onClick={() => { setEditingClient(client); setEditingClientName(client); }}>{t("edit")}</button><button className="entry-delete" onClick={() => removeClient(client)}>{t("delete")}</button></div>}</>}</div>)}</div>
+              {isAdmin && activeUser !== "Marc" && <div className="admin-client-actions">{filteredClients.map((client) => <div className="admin-client-row" key={`admin-${client}`}><strong>{client}</strong><div><button className="row-action" onClick={() => { setEditingClient(client); setEditingClientName(client); }}>{t("edit")}</button><button className="entry-delete" onClick={() => removeClient(client)}>{t("delete")}</button></div></div>)}</div>}
             </section>
           )}
-          {section === "users" && activeUser === "Marc" && (
+          {section === "users" && isAdmin && (
             <section className="section-card full-card user-management-card">
               <div className="toolbar">
                 <div>
@@ -1343,10 +1477,11 @@ export default function Home() {
                     <div className="user-primary"><b>{account.name}</b><span>{account.role === "Admin" ? t("admin") : t("technician")}</span></div>
                     <span className={`user-status ${account.active ? "user-active" : "user-disabled"}`}>{account.active ? t("active") : t("disabled")}</span>
                     <label className="tech-list-toggle"><input type="checkbox" checked={account.isTechnician} onChange={() => toggleTechnician(account.id)} /> {t("technicianList")}</label>
+                    {account.name !== "Marc" && account.name !== activeUser && <button className="outline-button" onClick={() => toggleAdminRole(account.id)}>{account.role === "Admin" ? t("technician") : t("admin")}</button>}
                     <button className="outline-button" onClick={() => setPasswordTargetId(passwordTargetId === account.id ? null : account.id)}>{t("adminChangePassword")}</button>
                     {passwordTargetId === account.id && <div className="managed-password-editor"><input type="password" value={managedPassword} onChange={(event) => setManagedPassword(event.target.value)} placeholder={t("newPassword")} /><button className="primary-button" onClick={saveManagedPassword}>{t("updatePassword")}</button></div>}
-                    <button className="outline-button" onClick={() => toggleUser(account.id)}>{account.active ? t("disabled") : t("active")}</button>
-                    {account.name !== "Marc" && <button className="danger-button user-delete" onClick={() => removeUser(account.id)}>{t("removeUser")}</button>}
+                    {account.name !== "Marc" && account.name !== activeUser && <button className="outline-button" onClick={() => toggleUser(account.id)}>{account.active ? t("disabled") : t("active")}</button>}
+                    {account.name !== "Marc" && account.name !== activeUser && <button className="danger-button user-delete" onClick={() => removeUser(account.id)}>{t("removeUser")}</button>}
                   </div>
                 ))}
               </div>
@@ -1470,7 +1605,7 @@ export default function Home() {
                 </table>
               </div>
               <div className="mobile-job-list">
-                {filteredJobs.map((job) => <article className="mobile-job-card" key={`mobile-${job.id}`} onClick={() => openJobDetails(job)}><div className="mobile-job-heading"><div><strong>{job.unit}</strong><span>{job.client}</span></div><span className="work-order-id">{job.id}</span></div><p className="mobile-job-description">{job.issue}</p><div className="mobile-job-meta"><span><small>{t("technician")}</small>{job.tech}</span><span><small>{t("priority")}</small>{t(job.priority)}</span><span><small>{t("status")}</small><StatusPill status={job.status} language={language} /></span></div><small className="mobile-job-updated">{job.updated}</small></article>)}
+                {filteredJobs.map((job) => <article className="mobile-job-card" key={`mobile-${job.id}`} onClick={() => openJobDetails(job)}><div className="mobile-job-heading"><div><strong>{job.unit}</strong><span>{job.client}</span></div><span className="work-order-id">{job.id}</span></div><p className="mobile-job-description">{job.issue}</p><div className="mobile-job-meta"><span><small>{t("technician")}</small>{job.tech}</span><span><small>{t("priority")}</small><b className={`mobile-job-priority priority-${job.priority.toLowerCase()}`}>{t(job.priority)}</b></span><span><small>{t("status")}</small><StatusPill status={job.status} language={language} /></span></div><small className="mobile-job-updated">{job.updated}</small></article>)}
               </div>
             </section>
           )}
@@ -1482,7 +1617,7 @@ export default function Home() {
                   value={String(unitData.length)}
                   detail={t("fleetRecordsDetail")}
                   tone="blue"
-                  icon="▣"
+                  icon="unit"
                 />
                 <MetricCard
                   label={t("unitsOverduePm")}
@@ -1539,6 +1674,10 @@ export default function Home() {
                       <div>
                         <label>{t("lastUsageLabel")}</label>
                         <b>{unit.usage}</b>
+                      </div>
+                      <div className="unit-meter-summary">
+                        <label>PM / {unit.meterUnit}</label>
+                        <b>{unit.currentMeter ?? "-"} / {unit.pmInterval}</b>
                       </div>
                       <div className="unit-due">
                         <button
@@ -1608,6 +1747,10 @@ export default function Home() {
                       {activeJob.unit} · {activeJob.client} · {t("lastServiceUsage")}: {activeJob.usage}
                     </small>
                     <span className="work-order-total-hours">{t("totalWorked")}: {workedHoursFor(activeJob.id)} h</span>
+                    {(() => { const unit = unitData.find((item) => item.unit === activeJob.unit); const due = unit && activeJob.meterReading != null && activeJob.meterReading - (unit.lastPmMeter ?? unit.currentMeter ?? activeJob.meterReading) >= (unit.pmInterval ?? 25000); return due ? <div className="cloud-banner cloud-warning work-order-pm-warning"><strong>{t("pmDue")}</strong><button type="button" className="outline-button" onClick={addPmServiceLine}>{t("addPmService")}</button></div> : null; })()}
+                    <div className="work-order-punch-actions">
+                      {activeTimeEntry?.workOrderId === activeJob.id ? <button type="button" className="punch-button punch-out" onClick={clockOut}>{t("clockOut")}</button> : <button type="button" className="punch-button punch-in" disabled={Boolean(activeTimeEntry)} onClick={() => clockIn(activeJob.id)}>{t("clockInThisWorkOrder")}</button>}
+                    </div>
                   </div>
                   <button
                     type="button"
@@ -1683,7 +1826,7 @@ export default function Home() {
                       onChange={(event) =>
                         updateJob("usage", event.target.value)
                       }
-                      placeholder="184220 KM or 4280 Hrs"
+                      placeholder={t("usageExample")}
                     />
                   </label>
                 </div>
@@ -1753,6 +1896,13 @@ export default function Home() {
                             {t("delete")}
                           </button>
                         </div>
+                        <label className="line-item-part-number">
+                          <span>{t("partNumber")}</span>
+                          <input
+                            value={item.partNumber ?? ""}
+                            onChange={(event) => updateLineItem(item.id, "partNumber", event.target.value)}
+                          />
+                        </label>
                         <label className="line-item-description">
                           <span>{t("description")}</span>
                           <input
@@ -1764,7 +1914,7 @@ export default function Home() {
                         </label>
                         <div className="line-item-fields">
                           <label>
-                            <span>Qty</span>
+                            <span>{t("quantity")}</span>
                             <input
                               type="number"
                               min="1"
@@ -1792,10 +1942,18 @@ export default function Home() {
                   </div>
                   <div className="line-item-entry">
                     <div className="line-item-entry-header">
-                      <span className="line-item-entry-title">Add an item</span>
+                      <span className="line-item-entry-title">{t("addAnItem")}</span>
                       <span className="line-item-entry-hint">{t("partsOnly")}</span>
                     </div>
                       <span className="line-item-kind line-item-kind-part">{t("part")}</span>
+                    <label className="line-item-part-number">
+                      <span>{t("partNumber")}</span>
+                      <input
+                        value={lineItem.partNumber}
+                        onChange={(event) => setLineItem((current) => ({ ...current, partNumber: event.target.value }))}
+                        placeholder={t("partNumber")}
+                      />
+                    </label>
                     <label className="line-item-description">
                       <span>{t("description")}</span>
                       <input
@@ -1811,7 +1969,7 @@ export default function Home() {
                     </label>
                     <div className="line-item-fields">
                       <label>
-                        <span>Qty</span>
+                        <span>{t("quantity")}</span>
                         <input
                           type="number"
                           min="1"
@@ -1858,6 +2016,15 @@ export default function Home() {
                   </button>
                 </div>
               </div>
+            </div>
+          )}
+          {completionPrompt && (
+            <div className="modal-backdrop" role="presentation">
+              <form className="modal-card completion-meter-modal" onSubmit={(event) => { event.preventDefault(); void completeJobWithMeter(); }}>
+                <div className="modal-header"><div><p className="card-kicker">{t("workOrderDetails")}</p><h2>{t("closingMeterReading")}</h2><small>{t("enterCurrentMeter")} ({unitData.find((unit) => unit.unit === completionPrompt.job.unit)?.meterUnit ?? "KM"})</small></div></div>
+                <div className="modal-fields"><label>{t("finalMeterReading")}<input autoFocus type="number" min="0" required value={completionPrompt.reading} onChange={(event) => setCompletionPrompt({ ...completionPrompt, reading: event.target.value })} /></label>{(() => { const unit = unitData.find((item) => item.unit === completionPrompt.job.unit); const reading = Number(completionPrompt.reading); const baseline = unit?.lastPmMeter ?? unit?.currentMeter ?? reading; return unit && Number.isFinite(reading) && reading - baseline >= (unit.pmInterval ?? 25000) ? <div className="cloud-banner cloud-warning">{t("pmIntervalExceeded")}: {reading - baseline} {unit.meterUnit} {t("sinceLastPm")}.</div> : null; })()}</div>
+                <div className="modal-actions"><button type="button" className="outline-button" onClick={() => setCompletionPrompt(null)}>{t("cancel")}</button><button type="submit" className="primary-button">{t("completeWorkOrder")}</button></div>
+              </form>
             </div>
           )}
           {modal !== "detail" && modal !== "history" && modal && (
@@ -1919,14 +2086,14 @@ export default function Home() {
                         </select>
                       </label>
                       <label>
-                        {t("lastServiceUsage")}
+                        {t("currentMileageHours")} ({form.meterUnit})
                         <input
                           required
-                          value={form.usage}
-                          onChange={(event) =>
-                            updateForm("usage", event.target.value)
-                          }
-                          placeholder={t("usageExample")}
+                          type="number"
+                          min="0"
+                          value={form.meterReading}
+                          onChange={(event) => updateForm("meterReading", event.target.value)}
+                          placeholder={form.meterUnit === "KM" ? "250000" : "5000"}
                         />
                       </label>
                       <label>
@@ -2002,27 +2169,16 @@ export default function Home() {
                           {Array.from(new Set([...clientData, ...(form.client && !clientData.includes(form.client) ? [form.client] : [])])).map((client) => <option key={client} value={client}>{client}</option>)}
                         </select>
                       </label>
-                      <label>
-                        {t("lastServiceDate")}
-                        <input
-                          type="date"
-                          value={form.service}
-                          onChange={(event) =>
-                            updateForm("service", event.target.value)
-                          }
-                        />
-                      </label>
-                      <label>
-                        {t("lastServiceUsage")}
-                        <input
-                          required
-                          value={form.usage}
-                          onChange={(event) =>
-                            updateForm("usage", event.target.value)
-                          }
-                          placeholder={t("usageExample")}
-                        />
-                      </label>
+                      {editingUnitId && <label>
+                          {t("lastServiceDate")}
+                          <input
+                            type="date"
+                            value={form.service}
+                            onChange={(event) =>
+                              updateForm("service", event.target.value)
+                            }
+                          />
+                        </label>}
                       <label>
                         {t("unitType")}
                         <input
@@ -2032,6 +2188,21 @@ export default function Home() {
                           }
                           placeholder={t("typeExample")}
                         />
+                      </label>
+                      <label>
+                        {t("meterType")}
+                        <select value={form.meterUnit} onChange={(event) => updateForm("meterUnit", event.target.value)}>
+                          <option value="KM">KM</option>
+                          <option value="HRS">HRS</option>
+                        </select>
+                      </label>
+                      <label>
+                        {t("currentMileageHours")}
+                        <input required type="number" min="0" value={form.currentMeter} onChange={(event) => updateForm("currentMeter", event.target.value)} placeholder={form.meterUnit === "KM" ? "250000" : "5000"} />
+                      </label>
+                      <label>
+                        {t("pmIntervalLabel")} ({form.meterUnit})
+                        <input type="number" min="1" value={form.pmInterval} onChange={(event) => updateForm("pmInterval", event.target.value)} placeholder={form.meterUnit === "KM" ? "25000" : "500"} />
                       </label>
                     </>
                   )}

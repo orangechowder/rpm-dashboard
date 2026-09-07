@@ -805,6 +805,62 @@ body {
   font-size: 9px;
 }
 
+.client-grid:has( + .admin-client-actions) {
+  display: none;
+}
+
+.admin-client-actions {
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 0;
+  display: grid;
+}
+
+.admin-client-row {
+  background: #fff;
+  border: 1px solid #edf0f4;
+  border-radius: 6px;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  min-height: 62px;
+  padding: 11px;
+  display: flex;
+}
+
+.admin-client-row strong {
+  color: #344055;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.admin-client-row > div {
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  display: flex;
+}
+
+.admin-client-row .row-action, .admin-client-row .entry-delete {
+  background: none;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.admin-client-row .row-action {
+  color: #647185;
+  letter-spacing: 0;
+}
+
+.admin-client-row .entry-delete {
+  color: #c23d3d;
+}
+
 .tech-list-toggle {
   color: #647185;
   white-space: nowrap;
@@ -1072,6 +1128,11 @@ button {
 
 .punch-out {
   background: #dc2626;
+}
+
+.punch-button:disabled {
+  cursor: not-allowed;
+  opacity: .45;
 }
 
 .emergency-button {
@@ -1735,6 +1796,29 @@ button {
   display: grid;
 }
 
+.metric-unit-icon:before, .metric-unit-icon:after {
+  content: "";
+  border: 2px solid;
+  display: block;
+  position: absolute;
+}
+
+.metric-unit-icon {
+  position: relative;
+}
+
+.metric-unit-icon:before {
+  width: 12px;
+  height: 12px;
+}
+
+.metric-unit-icon:after {
+  opacity: .45;
+  width: 7px;
+  height: 7px;
+  transform: translate(3px, 3px);
+}
+
 .metric-red {
   color: #e34844;
   background: #fff0ef;
@@ -2130,6 +2214,12 @@ button {
   display: block;
 }
 
+.mobile-job-priority {
+  font-size: 10px;
+  font-weight: 800;
+  display: block;
+}
+
 table {
   border-collapse: collapse;
   text-align: left;
@@ -2424,6 +2514,28 @@ td small {
   font-size: 11px;
   font-weight: 800;
   display: block;
+}
+
+.work-order-punch-actions {
+  align-items: center;
+  min-height: 32px;
+  margin-top: 10px;
+  display: flex;
+}
+
+.work-order-punch-actions .punch-button {
+  justify-content: center;
+  align-items: center;
+  min-width: 190px;
+  height: 32px;
+  padding: 0 12px;
+  font-size: 10px;
+  display: inline-flex;
+}
+
+.work-order-punch-actions .punch-button:disabled {
+  cursor: not-allowed;
+  opacity: .45;
 }
 
 .modal-close {
@@ -3180,7 +3292,7 @@ td small {
     max-width: none;
   }
 
-  .client-grid {
+  .client-grid, .admin-client-actions {
     grid-template-columns: 1fr;
   }
 
@@ -3241,6 +3353,17 @@ td small {
 
   .detail-modal .modal-header h2 {
     font-size: 20px;
+  }
+
+  .work-order-punch-actions {
+    width: 100%;
+  }
+
+  .work-order-punch-actions .punch-button {
+    width: 100%;
+    height: auto;
+    min-height: 38px;
+    font-size: 13px !important;
   }
 
   .detail-modal .modal-close {

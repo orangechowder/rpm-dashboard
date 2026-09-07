@@ -577,3 +577,140 @@
 {"timestamp":"14:07:23.554","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
 {"timestamp":"14:08:15.756","source":"Server","level":"LOG","message":"✓ Compiled in 239ms"}
 {"timestamp":"14:09:51.409","source":"Server","level":"LOG","message":"✓ Compiled in 269ms"}
+{"timestamp":"14:15:00.960","source":"Browser","level":"WARN","message":"Supabase realtime transport: socket closed: 1006"}
+{"timestamp":"14:15:01.029","source":"Server","level":"WARN","message":"[browser] \"\\u001b[33mSupabase realtime transport:\\u001b[39m\" \"\\u001b[33msocket closed: 1006\\u001b[39m\" \"\\u001b[2m(app/page.tsx:507:11)\\u001b[22m\""}
+{"timestamp":"14:15:01.035","source":"Browser","level":"WARN","message":"Supabase realtime transport: socket closed: 1006"}
+{"timestamp":"14:15:01.037","source":"Server","level":"WARN","message":"[browser] \"\\u001b[33mSupabase realtime transport:\\u001b[39m\" \"\\u001b[33msocket closed: 1006\\u001b[39m\" \"\\u001b[2m(app/page.tsx:507:11)\\u001b[22m\""}
+{"timestamp":"14:15:01.038","source":"Browser","level":"WARN","message":"Supabase realtime transport: socket closed: 1000"}
+{"timestamp":"14:15:01.038","source":"Server","level":"WARN","message":"[browser] \"\\u001b[33mSupabase realtime transport:\\u001b[39m\" \"\\u001b[33msocket closed: 1000\\u001b[39m\" \"\\u001b[2m(app/page.tsx:507:11)\\u001b[22m\""}
+{"timestamp":"14:15:01.039","source":"Browser","level":"WARN","message":"Supabase realtime transport: socket closed: 1000"}
+{"timestamp":"14:15:01.039","source":"Server","level":"WARN","message":"[browser] \"\\u001b[33mSupabase realtime transport:\\u001b[39m\" \"\\u001b[33msocket closed: 1000\\u001b[39m\" \"\\u001b[2m(app/page.tsx:507:11)\\u001b[22m\""}
+{"timestamp":"14:15:01.040","source":"Browser","level":"WARN","message":"Supabase realtime transport: socket closed: 1006"}
+{"timestamp":"14:15:01.042","source":"Server","level":"WARN","message":"[browser] \"\\u001b[33mSupabase realtime transport:\\u001b[39m\" \"\\u001b[33msocket closed: 1006\\u001b[39m\" \"\\u001b[2m(app/page.tsx:507:11)\\u001b[22m\""}
+{"timestamp":"14:15:01.047","source":"Browser","level":"WARN","message":"Supabase realtime transport: socket closed: 1006"}
+{"timestamp":"14:15:01.048","source":"Server","level":"WARN","message":"[browser] \"\\u001b[33mSupabase realtime transport:\\u001b[39m\" \"\\u001b[33msocket closed: 1006\\u001b[39m\" \"\\u001b[2m(app/page.tsx:507:11)\\u001b[22m\""}
+{"timestamp":"14:15:01.048","source":"Browser","level":"WARN","message":"Supabase realtime transport: socket closed: 1006"}
+{"timestamp":"14:15:01.050","source":"Server","level":"WARN","message":"[browser] \"\\u001b[33mSupabase realtime transport:\\u001b[39m\" \"\\u001b[33msocket closed: 1006\\u001b[39m\" \"\\u001b[2m(app/page.tsx:507:11)\\u001b[22m\""}
+{"timestamp":"14:15:01.050","source":"Browser","level":"WARN","message":"Supabase realtime transport: socket closed: 1006"}
+{"timestamp":"14:15:01.051","source":"Server","level":"WARN","message":"[browser] \"\\u001b[33mSupabase realtime transport:\\u001b[39m\" \"\\u001b[33msocket closed: 1006\\u001b[39m\" \"\\u001b[2m(app/page.tsx:507:11)\\u001b[22m\""}
+{"timestamp":"14:15:01.052","source":"Browser","level":"WARN","message":"Supabase realtime transport: socket closed: 1006"}
+{"timestamp":"14:15:01.052","source":"Server","level":"WARN","message":"[browser] \"\\u001b[33mSupabase realtime transport:\\u001b[39m\" \"\\u001b[33msocket closed: 1006\\u001b[39m\" \"\\u001b[2m(app/page.tsx:507:11)\\u001b[22m\""}
+{"timestamp":"14:15:01.053","source":"Browser","level":"WARN","message":"Supabase realtime transport: socket closed: 1006"}
+{"timestamp":"14:15:01.054","source":"Server","level":"WARN","message":"[browser] \"\\u001b[33mSupabase realtime transport:\\u001b[39m\" \"\\u001b[33msocket closed: 1006\\u001b[39m\" \"\\u001b[2m(app/page.tsx:507:11)\\u001b[22m\""}
+{"timestamp":"14:15:01.054","source":"Browser","level":"WARN","message":"Supabase realtime transport: socket closed: 1006"}
+{"timestamp":"14:15:01.057","source":"Server","level":"WARN","message":"[browser] \"\\u001b[33mSupabase realtime transport:\\u001b[39m\" \"\\u001b[33msocket closed: 1006\\u001b[39m\" \"\\u001b[2m(app/page.tsx:507:11)\\u001b[22m\""}
+{"timestamp":"14:15:01.057","source":"Browser","level":"ERROR","message":"./app/page.tsx:193:58\nError: Expected ';', '}' or <eof>\n  191 | ...\n  192 | ...\n> 193 | ...ériode précédente\", nextPeriod: \"Période suivante\", chooseDate: \"C...\n      |                                  ^\n  194 | ...N.parse(stored) as T) : fallback;\n  195 | ...\n  196 | ...\n\nParsing ecmascript source code failed\n\nImport traces:\n  Client Component Browser:\n    ./app/page.tsx [Client Component Browser]\n    ./app/page.tsx [Server Component]\n\n  Client Component SSR:\n    ./app/page.tsx [Client Component SSR]\n    ./app/page.tsx [Server Component] "}
+{"timestamp":"14:15:01.058","source":"Server","level":"ERROR","message":"[browser] \"./app/page.tsx:193:58\\nError: Expected ';', '}' or <eof>\\n  191 | ...\\n  192 | ...\\n> 193 | ...ériode précédente\\\", nextPeriod: \\\"Période suivante\\\", chooseDate: \\\"C...\\n      |                                  ^\\n  194 | ...N.parse(stored) as T) : fallback;\\n  195 | ...\\n  196 | ...\\n\\nParsing ecmascript source code failed\\n\\nImport traces:\\n  Client Component Browser:\\n    ./app/page.tsx [Client Component Browser]\\n    ./app/page.tsx [Server Component]\\n\\n  Client Component SSR:\\n    ./app/page.tsx [Client Component SSR]\\n    ./app/page.tsx [Server Component]\" \"\""}
+{"timestamp":"14:15:01.058","source":"Browser","level":"ERROR","message":"./app/page.tsx:193:58\nError: Expected ';', '}' or <eof>\n  191 | ...\n  192 | ...\n> 193 | ...ériode précédente\", nextPeriod: \"Période suivante\", chooseDate: \"C...\n      |                                  ^\n  194 | ...N.parse(stored) as T) : fallback;\n  195 | ...\n  196 | ...\n\nParsing ecmascript source code failed\n\nImport traces:\n  Client Component Browser:\n    ./app/page.tsx [Client Component Browser]\n    ./app/page.tsx [Server Component]\n\n  Client Component SSR:\n    ./app/page.tsx [Client Component SSR]\n    ./app/page.tsx [Server Component] "}
+{"timestamp":"14:15:01.058","source":"Server","level":"ERROR","message":"[browser] \"./app/page.tsx:193:58\\nError: Expected ';', '}' or <eof>\\n  191 | ...\\n  192 | ...\\n> 193 | ...ériode précédente\\\", nextPeriod: \\\"Période suivante\\\", chooseDate: \\\"C...\\n      |                                  ^\\n  194 | ...N.parse(stored) as T) : fallback;\\n  195 | ...\\n  196 | ...\\n\\nParsing ecmascript source code failed\\n\\nImport traces:\\n  Client Component Browser:\\n    ./app/page.tsx [Client Component Browser]\\n    ./app/page.tsx [Server Component]\\n\\n  Client Component SSR:\\n    ./app/page.tsx [Client Component SSR]\\n    ./app/page.tsx [Server Component]\" \"\""}
+{"timestamp":"14:15:01.059","source":"Browser","level":"ERROR","message":"./app/page.tsx:193:58\nError: Expected ';', '}' or <eof>\n  191 | ...\n  192 | ...\n> 193 | ...ériode précédente\", nextPeriod: \"Période suivante\", chooseDate: \"C...\n      |                                  ^\n  194 | ...N.parse(stored) as T) : fallback;\n  195 | ...\n  196 | ...\n\nParsing ecmascript source code failed\n\nImport traces:\n  Client Component Browser:\n    ./app/page.tsx [Client Component Browser]\n    ./app/page.tsx [Server Component]\n\n  Client Component SSR:\n    ./app/page.tsx [Client Component SSR]\n    ./app/page.tsx [Server Component] "}
+{"timestamp":"14:15:01.059","source":"Server","level":"ERROR","message":"[browser] \"./app/page.tsx:193:58\\nError: Expected ';', '}' or <eof>\\n  191 | ...\\n  192 | ...\\n> 193 | ...ériode précédente\\\", nextPeriod: \\\"Période suivante\\\", chooseDate: \\\"C...\\n      |                                  ^\\n  194 | ...N.parse(stored) as T) : fallback;\\n  195 | ...\\n  196 | ...\\n\\nParsing ecmascript source code failed\\n\\nImport traces:\\n  Client Component Browser:\\n    ./app/page.tsx [Client Component Browser]\\n    ./app/page.tsx [Server Component]\\n\\n  Client Component SSR:\\n    ./app/page.tsx [Client Component SSR]\\n    ./app/page.tsx [Server Component]\" \"\""}
+{"timestamp":"14:15:01.059","source":"Browser","level":"ERROR","message":"./app/page.tsx:193:58\nError: Expected ';', '}' or <eof>\n  191 | ...\n  192 | ...\n> 193 | ...ériode précédente\", nextPeriod: \"Période suivante\", chooseDate: \"C...\n      |                                  ^\n  194 | ...N.parse(stored) as T) : fallback;\n  195 | ...\n  196 | ...\n\nParsing ecmascript source code failed\n\nImport traces:\n  Client Component Browser:\n    ./app/page.tsx [Client Component Browser]\n    ./app/page.tsx [Server Component]\n\n  Client Component SSR:\n    ./app/page.tsx [Client Component SSR]\n    ./app/page.tsx [Server Component] "}
+{"timestamp":"14:15:01.063","source":"Server","level":"ERROR","message":"[browser] \"./app/page.tsx:193:58\\nError: Expected ';', '}' or <eof>\\n  191 | ...\\n  192 | ...\\n> 193 | ...ériode précédente\\\", nextPeriod: \\\"Période suivante\\\", chooseDate: \\\"C...\\n      |                                  ^\\n  194 | ...N.parse(stored) as T) : fallback;\\n  195 | ...\\n  196 | ...\\n\\nParsing ecmascript source code failed\\n\\nImport traces:\\n  Client Component Browser:\\n    ./app/page.tsx [Client Component Browser]\\n    ./app/page.tsx [Server Component]\\n\\n  Client Component SSR:\\n    ./app/page.tsx [Client Component SSR]\\n    ./app/page.tsx [Server Component]\" \"\""}
+{"timestamp":"14:15:01.064","source":"Browser","level":"ERROR","message":"./app/page.tsx:194:58\nError: Expected ';', '}' or <eof>\n  192 | ...\n  193 | ...\n> 194 | ...ériode précédente\", nextPeriod: \"Période suivante\", chooseDate: \"C...\n      |                                  ^\n  195 | ...N.parse(stored) as T) : fallback;\n  196 | ...\n  197 | ...\n\nParsing ecmascript source code failed\n\nImport traces:\n  Client Component Browser:\n    ./app/page.tsx [Client Component Browser]\n    ./app/page.tsx [Server Component]\n\n  Client Component SSR:\n    ./app/page.tsx [Client Component SSR]\n    ./app/page.tsx [Server Component] "}
+{"timestamp":"14:15:01.064","source":"Server","level":"ERROR","message":"[browser] \"./app/page.tsx:194:58\\nError: Expected ';', '}' or <eof>\\n  192 | ...\\n  193 | ...\\n> 194 | ...ériode précédente\\\", nextPeriod: \\\"Période suivante\\\", chooseDate: \\\"C...\\n      |                                  ^\\n  195 | ...N.parse(stored) as T) : fallback;\\n  196 | ...\\n  197 | ...\\n\\nParsing ecmascript source code failed\\n\\nImport traces:\\n  Client Component Browser:\\n    ./app/page.tsx [Client Component Browser]\\n    ./app/page.tsx [Server Component]\\n\\n  Client Component SSR:\\n    ./app/page.tsx [Client Component SSR]\\n    ./app/page.tsx [Server Component]\" \"\""}
+{"timestamp":"14:15:01.067","source":"Browser","level":"WARN","message":"Supabase realtime transport: socket closed: 1006"}
+{"timestamp":"14:15:01.144","source":"Browser","level":"WARN","message":"Supabase realtime transport: socket closed: 1006"}
+{"timestamp":"14:15:01.158","source":"Server","level":"WARN","message":"[browser] \"\\u001b[33mSupabase realtime transport:\\u001b[39m\" \"\\u001b[33msocket closed: 1006\\u001b[39m\" \"\\u001b[2m(app/page.tsx:619:15)\\u001b[22m\""}
+{"timestamp":"14:15:01.166","source":"Server","level":"WARN","message":"[browser] \"\\u001b[33mSupabase realtime transport:\\u001b[39m\" \"\\u001b[33msocket closed: 1006\\u001b[39m\" \"\\u001b[2m(app/page.tsx:619:15)\\u001b[22m\""}
+{"timestamp":"14:15:03.026","source":"Browser","level":"WARN","message":"Supabase realtime transport: socket closed: 1006"}
+{"timestamp":"14:15:03.034","source":"Server","level":"WARN","message":"[browser] \"\\u001b[33mSupabase realtime transport:\\u001b[39m\" \"\\u001b[33msocket closed: 1006\\u001b[39m\" \"\\u001b[2m(app/page.tsx:619:15)\\u001b[22m\""}
+{"timestamp":"35:53:17.803","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"35:55:04.372","source":"Server","level":"LOG","message":"✓ Compiled in 1026ms"}
+{"timestamp":"35:58:23.339","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"36:03:59.313","source":"Server","level":"ERROR","message":"[Server HMR] Update failed, full reload needed: SyntaxError: Identifier 'currentAccount' has already been declared"}
+{"timestamp":"36:03:59.371","source":"Server","level":"LOG","message":"✓ Compiled in 640ms"}
+{"timestamp":"36:04:18.028","source":"Server","level":"LOG","message":"✓ Compiled in 247ms"}
+{"timestamp":"36:05:00.635","source":"Server","level":"LOG","message":"✓ Compiled in 343ms"}
+{"timestamp":"36:06:13.440","source":"Browser","level":"ERROR","message":"./app/page.tsx:691:9\nError: the name `currentAccount` is defined multiple times\n  689 |     : undefined;\n  690 |   const workedHoursFor = (workOrderId: string) => timeEntries.filter(...\n> 691 |   const currentAccount = userAccounts.find((account) => account.name ...\n      |         ^^^^^^^^^^^^^^\n  692 |   const punchDayKey = (iso: string) => {\n  693 |     const date = new Date(iso);\n  694 |     return `${date.getFullYear()}-${String(date.getMonth() + 1).padSt...\n\nEcmascript file had an error\n\nImport traces:\n  Client Component Browser:\n    ./app/page.tsx [Client Component Browser]\n    ./app/page.tsx [Server Component]\n\n  Client Component SSR:\n    ./app/page.tsx [Client Component SSR]\n    ./app/page.tsx [Server Component] "}
+{"timestamp":"36:06:13.446","source":"Server","level":"ERROR","message":"[browser] \"./app/page.tsx:691:9\\nError: the name `currentAccount` is defined multiple times\\n  689 |     : undefined;\\n  690 |   const workedHoursFor = (workOrderId: string) => timeEntries.filter(...\\n> 691 |   const currentAccount = userAccounts.find((account) => account.name ...\\n      |         ^^^^^^^^^^^^^^\\n  692 |   const punchDayKey = (iso: string) => {\\n  693 |     const date = new Date(iso);\\n  694 |     return `${date.getFullYear()}-${String(date.getMonth() + 1).padSt...\\n\\nEcmascript file had an error\\n\\nImport traces:\\n  Client Component Browser:\\n    ./app/page.tsx [Client Component Browser]\\n    ./app/page.tsx [Server Component]\\n\\n  Client Component SSR:\\n    ./app/page.tsx [Client Component SSR]\\n    ./app/page.tsx [Server Component]\" \"\""}
+{"timestamp":"36:06:13.448","source":"Browser","level":"ERROR","message":"./app/page.tsx:691:9\nError: the name `currentAccount` is defined multiple times\n  689 |     : undefined;\n  690 |   const workedHoursFor = (workOrderId: string) => timeEntries.filter(...\n> 691 |   const currentAccount = userAccounts.find((account) => account.name ...\n      |         ^^^^^^^^^^^^^^\n  692 |   const punchDayKey = (iso: string) => {\n  693 |     const date = new Date(iso);\n  694 |     return `${date.getFullYear()}-${String(date.getMonth() + 1).padSt...\n\nEcmascript file had an error\n\nImport traces:\n  Client Component Browser:\n    ./app/page.tsx [Client Component Browser]\n    ./app/page.tsx [Server Component]\n\n  Client Component SSR:\n    ./app/page.tsx [Client Component SSR]\n    ./app/page.tsx [Server Component] "}
+{"timestamp":"36:06:13.449","source":"Server","level":"ERROR","message":"[browser] \"./app/page.tsx:691:9\\nError: the name `currentAccount` is defined multiple times\\n  689 |     : undefined;\\n  690 |   const workedHoursFor = (workOrderId: string) => timeEntries.filter(...\\n> 691 |   const currentAccount = userAccounts.find((account) => account.name ...\\n      |         ^^^^^^^^^^^^^^\\n  692 |   const punchDayKey = (iso: string) => {\\n  693 |     const date = new Date(iso);\\n  694 |     return `${date.getFullYear()}-${String(date.getMonth() + 1).padSt...\\n\\nEcmascript file had an error\\n\\nImport traces:\\n  Client Component Browser:\\n    ./app/page.tsx [Client Component Browser]\\n    ./app/page.tsx [Server Component]\\n\\n  Client Component SSR:\\n    ./app/page.tsx [Client Component SSR]\\n    ./app/page.tsx [Server Component]\" \"\""}
+{"timestamp":"36:07:22.644","source":"Server","level":"LOG","message":"✓ Compiled in 434ms"}
+{"timestamp":"36:09:52.244","source":"Server","level":"LOG","message":"✓ Compiled in 354ms"}
+{"timestamp":"36:11:41.763","source":"Server","level":"LOG","message":"✓ Compiled in 218ms"}
+{"timestamp":"36:11:58.542","source":"Server","level":"LOG","message":"✓ Compiled in 388ms"}
+{"timestamp":"36:13:49.726","source":"Server","level":"LOG","message":"✓ Compiled in 335ms"}
+{"timestamp":"36:13:53.478","source":"Server","level":"LOG","message":"✓ Compiled in 262ms"}
+{"timestamp":"36:15:04.342","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"36:16:38.639","source":"Server","level":"LOG","message":"✓ Compiled in 202ms"}
+{"timestamp":"36:17:02.905","source":"Server","level":"LOG","message":"✓ Compiled in 267ms"}
+{"timestamp":"36:17:08.582","source":"Server","level":"LOG","message":"✓ Compiled in 313ms"}
+{"timestamp":"36:17:45.658","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"36:19:32.491","source":"Server","level":"LOG","message":"✓ Compiled in 289ms"}
+{"timestamp":"36:21:58.671","source":"Server","level":"LOG","message":"✓ Compiled in 263ms"}
+{"timestamp":"36:22:01.418","source":"Server","level":"LOG","message":"✓ Compiled in 140ms"}
+{"timestamp":"36:23:56.632","source":"Server","level":"LOG","message":"✓ Compiled in 265ms"}
+{"timestamp":"36:25:34.932","source":"Server","level":"LOG","message":"✓ Compiled in 279ms"}
+{"timestamp":"36:25:42.545","source":"Server","level":"LOG","message":"✓ Compiled in 214ms"}
+{"timestamp":"36:28:25.989","source":"Server","level":"LOG","message":"✓ Compiled in 315ms"}
+{"timestamp":"36:30:16.837","source":"Server","level":"LOG","message":"✓ Compiled in 287ms"}
+{"timestamp":"36:31:36.815","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"36:34:32.712","source":"Server","level":"LOG","message":"✓ Compiled in 545ms"}
+{"timestamp":"36:34:38.200","source":"Server","level":"LOG","message":"✓ Compiled in 286ms"}
+{"timestamp":"36:35:57.134","source":"Server","level":"LOG","message":"✓ Compiled in 404ms"}
+{"timestamp":"36:36:00.727","source":"Server","level":"LOG","message":"✓ Compiled in 480ms"}
+{"timestamp":"36:36:05.585","source":"Server","level":"LOG","message":"✓ Compiled in 197ms"}
+{"timestamp":"36:38:29.238","source":"Server","level":"LOG","message":"✓ Compiled in 303ms"}
+{"timestamp":"36:38:37.521","source":"Server","level":"LOG","message":"✓ Compiled in 293ms"}
+{"timestamp":"36:39:13.557","source":"Server","level":"LOG","message":"✓ Compiled in 223ms"}
+{"timestamp":"36:39:47.611","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"36:42:17.721","source":"Server","level":"LOG","message":"✓ Compiled in 648ms"}
+{"timestamp":"36:42:18.298","source":"Server","level":"LOG","message":"✓ Compiled in 0ms"}
+{"timestamp":"36:49:37.661","source":"Browser","level":"INFO","message":"Download the React DevTools for a better development experience: https://react.dev/link/react-devtools"}
+{"timestamp":"36:51:22.863","source":"Server","level":"LOG","message":"✓ Compiled in 487ms"}
+{"timestamp":"36:51:30.331","source":"Server","level":"LOG","message":"✓ Compiled in 546ms"}
+{"timestamp":"36:51:30.987","source":"Server","level":"LOG","message":"✓ Compiled in 1ms"}
+{"timestamp":"36:57:53.221","source":"Server","level":"LOG","message":"✓ Compiled in 576ms"}
+{"timestamp":"37:11:35.148","source":"Server","level":"LOG","message":"✓ Compiled in 478ms"}
+{"timestamp":"37:11:56.793","source":"Server","level":"LOG","message":"✓ Compiled in 221ms"}
+{"timestamp":"37:12:01.876","source":"Server","level":"LOG","message":"✓ Compiled in 140ms"}
+{"timestamp":"37:12:28.133","source":"Server","level":"LOG","message":"✓ Compiled in 307ms"}
+{"timestamp":"37:12:32.455","source":"Server","level":"LOG","message":"✓ Compiled in 291ms"}
+{"timestamp":"37:12:32.548","source":"Server","level":"LOG","message":"✓ Compiled in 0ms"}
+{"timestamp":"37:12:49.405","source":"Server","level":"LOG","message":"✓ Compiled in 324ms"}
+{"timestamp":"37:12:54.903","source":"Server","level":"LOG","message":"✓ Compiled in 242ms"}
+{"timestamp":"37:13:08.805","source":"Server","level":"LOG","message":"✓ Compiled in 440ms"}
+{"timestamp":"37:13:09.254","source":"Server","level":"LOG","message":"✓ Compiled in 3ms"}
+{"timestamp":"37:13:20.105","source":"Server","level":"LOG","message":"✓ Compiled in 330ms"}
+{"timestamp":"37:13:31.498","source":"Server","level":"LOG","message":"✓ Compiled in 330ms"}
+{"timestamp":"37:13:31.770","source":"Server","level":"LOG","message":"✓ Compiled in 0ms"}
+{"timestamp":"37:13:43.530","source":"Server","level":"LOG","message":"✓ Compiled in 317ms"}
+{"timestamp":"37:13:53.482","source":"Server","level":"LOG","message":"✓ Compiled in 237ms"}
+{"timestamp":"37:14:22.586","source":"Server","level":"LOG","message":"✓ Compiled in 137ms"}
+{"timestamp":"37:14:54.135","source":"Server","level":"LOG","message":"✓ Compiled in 497ms"}
+{"timestamp":"37:20:18.531","source":"Server","level":"LOG","message":"✓ Compiled in 654ms"}
+{"timestamp":"37:20:19.481","source":"Server","level":"LOG","message":"✓ Compiled in 1ms"}
+{"timestamp":"37:20:23.690","source":"Server","level":"LOG","message":"✓ Compiled in 313ms"}
+{"timestamp":"37:20:35.637","source":"Server","level":"LOG","message":"✓ Compiled in 223ms"}
+{"timestamp":"37:21:34.015","source":"Server","level":"LOG","message":"✓ Compiled in 319ms"}
+{"timestamp":"37:21:34.572","source":"Server","level":"LOG","message":"✓ Compiled in 0ms"}
+{"timestamp":"37:21:48.232","source":"Server","level":"LOG","message":"✓ Compiled in 248ms"}
+{"timestamp":"37:22:02.160","source":"Server","level":"LOG","message":"✓ Compiled in 236ms"}
+{"timestamp":"37:22:05.865","source":"Server","level":"LOG","message":"✓ Compiled in 315ms"}
+{"timestamp":"37:22:11.118","source":"Server","level":"LOG","message":"✓ Compiled in 199ms"}
+{"timestamp":"37:22:30.113","source":"Server","level":"LOG","message":"✓ Compiled in 284ms"}
+{"timestamp":"37:22:43.154","source":"Server","level":"LOG","message":"✓ Compiled in 192ms"}
+{"timestamp":"37:22:52.670","source":"Server","level":"LOG","message":"✓ Compiled in 299ms"}
+{"timestamp":"37:23:30.652","source":"Server","level":"LOG","message":"✓ Compiled in 210ms"}
+{"timestamp":"37:25:55.064","source":"Browser","level":"ERROR","message":"⨯ unhandledRejection: {\"code\":\"PGRST204\",\"details\":null,\"hint\":null,\"message\":\"Could not find the 'meter_reading' column of 'work_orders' in the schema cache\"} \n"}
+{"timestamp":"37:25:55.100","source":"Server","level":"ERROR","message":"[browser] \"\\u001b[31m\\\"⨯ unhandledRejection:\\\"\\u001b[39m\" \"{\\n  code: \\u001b[32m'PGRST204'\\u001b[39m,\\n  details: \\u001b[1mnull\\u001b[22m,\\n  hint: \\u001b[1mnull\\u001b[22m,\\n  message: \\u001b[32m\\\"Could not find the 'meter_reading' column of 'work_orders' in the schema cache\\\"\\u001b[39m\\n}\" \"\\n\\u001b[31m\\u001b[39m\""}
+{"timestamp":"37:25:58.005","source":"Server","level":"LOG","message":"✓ Compiled in 409ms"}
+{"timestamp":"37:25:58.479","source":"Server","level":"LOG","message":"✓ Compiled in 0ms"}
+{"timestamp":"37:26:12.279","source":"Server","level":"LOG","message":"✓ Compiled in 359ms"}
+{"timestamp":"37:26:13.237","source":"Server","level":"LOG","message":"✓ Compiled in 18ms"}
+{"timestamp":"37:26:23.210","source":"Server","level":"LOG","message":"✓ Compiled in 270ms"}
+{"timestamp":"37:26:28.407","source":"Server","level":"LOG","message":"✓ Compiled in 272ms"}
+{"timestamp":"37:26:33.675","source":"Server","level":"LOG","message":"✓ Compiled in 263ms"}
+{"timestamp":"37:26:38.106","source":"Server","level":"LOG","message":"✓ Compiled in 202ms"}
+{"timestamp":"37:26:43.315","source":"Server","level":"LOG","message":"✓ Compiled in 280ms"}
+{"timestamp":"37:30:03.173","source":"Server","level":"LOG","message":"✓ Compiled in 208ms"}
+{"timestamp":"37:32:35.986","source":"Server","level":"LOG","message":"✓ Compiled in 620ms"}
+{"timestamp":"37:32:36.229","source":"Server","level":"LOG","message":"✓ Compiled in 0ms"}
+{"timestamp":"37:32:41.147","source":"Server","level":"LOG","message":"✓ Compiled in 391ms"}
+{"timestamp":"37:35:11.684","source":"Server","level":"LOG","message":"✓ Compiled in 431ms"}
+{"timestamp":"37:35:55.845","source":"Server","level":"LOG","message":"✓ Compiled in 323ms"}
+{"timestamp":"37:36:35.782","source":"Browser","level":"ERROR","message":"The final argument passed to useEffect changed size between renders. The order and size of this array must remain constant.\n\nPrevious: [true, Marc]\nIncoming: [true, Marc, [object Object]] \n    at Home (app/page.tsx:621:12)\n    at Set.forEach (<anonymous>)\n  \u001b[90m619 |\u001b[0m     \u001b[36mvoid\u001b[0m saveUnits(unitData);\n  \u001b[90m620 |\u001b[0m   }, [unitData, cloudReady]);\n\u001b[31m\u001b[1m>\u001b[0m \u001b[90m621 |\u001b[0m   useEffect(() => {\n  \u001b[90m    |\u001b[0m            \u001b[31m\u001b[1m^\u001b[0m\n  \u001b[90m622 |\u001b[0m     \u001b[36mif\u001b[0m (!cloudReady || !hasSupabaseConfig) \u001b[36mreturn\u001b[0m;\n  \u001b[90m623 |\u001b[0m     \u001b[36mconst\u001b[0m applyUnitChange = (change: \u001b[33mRealtimeChange\u001b[0m<\u001b[33mCloudUnit\u001b[0m>) => {\n  \u001b[90m624 |\u001b[0m       remoteUnitsUpdate.current = \u001b[36mtrue\u001b[0m; (app/page.tsx:621:12)"}
+{"timestamp":"37:36:35.782","source":"Server","level":"ERROR","message":"[browser] \"The final argument passed to useEffect changed size between renders. The order and size of this array must remain constant.\\n\\nPrevious: [true, Marc]\\nIncoming: [true, Marc, [object Object]]\" \"\\n\\u001b[31m    at Home (app/page.tsx:621:12)\\n    at Set.forEach (<anonymous>)\\u001b[39m\\n  \\u001b[90m619 |\\u001b[0m     \\u001b[36mvoid\\u001b[0m saveUnits(unitData);\\n  \\u001b[90m620 |\\u001b[0m   }, [unitData, cloudReady]);\\n\\u001b[31m\\u001b[1m>\\u001b[0m \\u001b[90m621 |\\u001b[0m   useEffect(() => {\\n  \\u001b[90m    |\\u001b[0m            \\u001b[31m\\u001b[1m^\\u001b[0m\\n  \\u001b[90m622 |\\u001b[0m     \\u001b[36mif\\u001b[0m (!cloudReady || !hasSupabaseConfig) \\u001b[36mreturn\\u001b[0m;\\n  \\u001b[90m623 |\\u001b[0m     \\u001b[36mconst\\u001b[0m applyUnitChange = (change: \\u001b[33mRealtimeChange\\u001b[0m<\\u001b[33mCloudUnit\\u001b[0m>) => {\\n  \\u001b[90m624 |\\u001b[0m       remoteUnitsUpdate.current = \\u001b[36mtrue\\u001b[0m;\" \"\\u001b[2m(app/page.tsx:621:12)\\u001b[22m\""}
+{"timestamp":"37:39:03.354","source":"Server","level":"LOG","message":"✓ Compiled in 149ms"}
+{"timestamp":"37:42:28.122","source":"Server","level":"LOG","message":"✓ Compiled in 723ms"}

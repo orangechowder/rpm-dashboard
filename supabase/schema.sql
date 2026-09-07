@@ -9,6 +9,10 @@ create table if not exists public.fleet_units (
   due text not null default 'Schedule PM',
   overdue boolean not null default false,
   usage text not null,
+  current_meter numeric,
+  last_pm_meter numeric,
+  pm_interval numeric not null default 25000,
+  meter_unit text not null default 'KM' check (meter_unit in ('KM', 'HRS')),
   updated_at timestamptz not null default now()
 );
 
@@ -22,6 +26,7 @@ create table if not exists public.work_orders (
   issue text not null,
   updated text not null default 'Just now',
   usage text not null,
+  meter_reading numeric,
   notes jsonb not null default '[]'::jsonb,
   line_items jsonb not null default '[]'::jsonb,
   updated_at timestamptz not null default now()
@@ -59,10 +64,39 @@ create table if not exists public.time_entries (
   created_at timestamptz not null default now()
 );
 
+alter table public.fleet_units add column if not exists current_meter numeric;
+alter table public.fleet_units add column if not exists last_pm_meter numeric;
+alter table public.fleet_units add column if not exists pm_interval numeric not null default 25000;
+alter table public.fleet_units add column if not exists meter_unit text not null default 'KM';
+alter table public.work_orders add column if not exists meter_reading numeric;
+
 create or replace function public.touch_updated_at()
 returns trigger language plpgsql as $$
 begin
   new.updated_at = now();
+  return new;
+end;
+$$;
+
+create or replace function public.sync_work_order_meter()
+returns trigger language plpgsql as $$
+declare
+  unit_interval numeric;
+  unit_last_pm numeric;
+begin
+  if new.meter_reading is not null and (tg_op = 'INSERT' or old.meter_reading is distinct from new.meter_reading or old.status is distinct from new.status) then
+    select pm_interval, coalesce(last_pm_meter, current_meter, new.meter_reading)
+      into unit_interval, unit_last_pm
+      from public.fleet_units where unit = new.unit for update;
+    update public.fleet_units
+      set current_meter = new.meter_reading,
+          overdue = (new.meter_reading - coalesce(unit_last_pm, new.meter_reading)) >= coalesce(unit_interval, 25000),
+          updated_at = now()
+      where unit = new.unit;
+    if new.status = 'Completed' and (tg_op = 'INSERT' or old.status is distinct from new.status) then
+      update public.fleet_units set last_pm_meter = new.meter_reading, overdue = false, updated_at = now() where unit = new.unit;
+    end if;
+  end if;
   return new;
 end;
 $$;
@@ -73,6 +107,8 @@ drop trigger if exists work_orders_touch_updated_at on public.work_orders;
 create trigger work_orders_touch_updated_at before update on public.work_orders for each row execute function public.touch_updated_at();
 drop trigger if exists user_accounts_touch_updated_at on public.user_accounts;
 create trigger user_accounts_touch_updated_at before update on public.user_accounts for each row execute function public.touch_updated_at();
+drop trigger if exists work_orders_sync_meter on public.work_orders;
+create trigger work_orders_sync_meter after insert or update of meter_reading, status on public.work_orders for each row execute function public.sync_work_order_meter();
 
 alter table public.fleet_units enable row level security;
 alter table public.work_orders enable row level security;
