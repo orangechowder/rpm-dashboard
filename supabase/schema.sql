@@ -70,6 +70,53 @@ alter table public.fleet_units add column if not exists pm_interval numeric not 
 alter table public.fleet_units add column if not exists meter_unit text not null default 'KM';
 alter table public.work_orders add column if not exists meter_reading numeric;
 
+-- Unit numbers are only unique per client (the same "1" can exist for two different clients).
+-- Drop the old FK that assumed `unit` alone was unique; it's no longer a valid reference target.
+do $$
+begin
+  if exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.work_orders'::regclass
+      and conname = 'work_orders_unit_fkey'
+  ) then
+    alter table public.work_orders drop constraint work_orders_unit_fkey;
+  end if;
+end;
+$$;
+
+-- Give fleet_units a surrogate primary key so (unit, client) can become a composite unique constraint instead.
+alter table public.fleet_units add column if not exists id uuid not null default gen_random_uuid();
+
+do $$
+declare
+  old_pk text;
+begin
+  select conname into old_pk from pg_constraint where conrelid = 'public.fleet_units'::regclass and contype = 'p';
+  if old_pk is not null and old_pk <> 'fleet_units_pkey_id' then
+    execute format('alter table public.fleet_units drop constraint %I', old_pk);
+  end if;
+  if not exists (select 1 from pg_constraint where conrelid = 'public.fleet_units'::regclass and contype = 'p') then
+    alter table public.fleet_units add constraint fleet_units_pkey_id primary key (id);
+  end if;
+end;
+$$;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.fleet_units'::regclass
+      and conname = 'fleet_units_unit_client_key'
+  ) then
+    alter table public.fleet_units add constraint fleet_units_unit_client_key unique (unit, client);
+  end if;
+end;
+$$;
+
+-- Work orders keep a plain (unmanaged) unit/client snapshot; referential integrity against fleet_units
+-- is enforced in the application layer (see deleteUnit's linked-work-order check in app/page.tsx),
+-- since a composite FK would otherwise cascade-rewrite historical job.client snapshots on unit edits.
+
 create or replace function public.touch_updated_at()
 returns trigger language plpgsql as $$
 begin

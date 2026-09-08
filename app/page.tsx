@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Image from "next/image";
-import { completeTimeEntry, createManualTimeEntry, createTimeEntry, hasSupabaseConfig, loadFleetData, loadTimeEntries, loadUsers, removeJob, removeTimeEntry, removeUnit, saveJobs, saveUnits, saveUsers, subscribeToFleet, updateTimeEntry, writeActivityLog, type RealtimeChange, type CloudJob, type CloudTimeEntry, type CloudUnit, type CloudUser } from "../lib/fleet-repository";
+import { clearOfflineMutations, enqueueOfflineMutation, mergeRemoteRecords, readOfflineMutations, recordsEqual, remoteWins, validateCompletion } from "../lib/reliability";
+import { completeTimeEntry, createManualTimeEntry, createTimeEntry, hasSupabaseConfig, loadFleetData, loadTimeEntries, loadUsers, removeJob, removeTimeEntry, removeUnit, removeUserAccount, saveJobs, saveUnits, saveUsers, subscribeToFleet, updateTimeEntry, writeActivityLog, type RealtimeChange, type CloudJob, type CloudTimeEntry, type CloudUnit, type CloudUser } from "../lib/fleet-repository";
 
 type Section = "overview" | "jobs" | "units" | "users" | "clients" | "punch";
 type Language = "en" | "fr";
@@ -31,6 +32,7 @@ type Job = {
   meterReading?: number | null;
   notes?: Note[];
   lineItems?: LineItem[];
+  updatedAt?: string;
 };
 type Unit = {
   unit: string;
@@ -45,7 +47,13 @@ type Unit = {
   lastPmMeter?: number | null;
   pmInterval?: number;
   meterUnit?: "KM" | "HRS";
+  updatedAt?: string;
 };
+type OfflinePayload =
+  | { kind: "jobs"; jobs: Job[] }
+  | { kind: "units"; units: Unit[] }
+  | { kind: "clock-in"; entry: { userId: string; userName: string; workOrderId: string; clockIn: string } }
+  | { kind: "clock-out"; entry: { id: string; clockOut: string; totalHours: number } };
 
 const jobs: Job[] = [
   {
@@ -215,6 +223,12 @@ function loadStored<T>(key: string, fallback: T): T {
   }
 }
 
+function getDeviceLanguage(): Language {
+  if (typeof navigator === "undefined") return "en";
+  const preferredLanguages = navigator.languages?.length ? navigator.languages : [navigator.language];
+  return preferredLanguages.some((language) => language.toLowerCase().startsWith("fr")) ? "fr" : "en";
+}
+
 function createId() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
@@ -274,12 +288,106 @@ function PunchClock({ activeEntry, jobs, language, onClockIn, onClockOut }: { ac
   }, [activeEntry]);
   const elapsed = activeEntry ? Math.max(0, now - new Date(activeEntry.clockIn).getTime()) : 0;
   const elapsedLabel = `${String(Math.floor(elapsed / 3600000)).padStart(2, "0")}:${String(Math.floor((elapsed % 3600000) / 60000)).padStart(2, "0")}:${String(Math.floor((elapsed % 60000) / 1000)).padStart(2, "0")}`;
-  return <div className={`punch-clock ${activeEntry ? "punch-active" : ""}`}><span className="punch-indicator" /><div className="punch-copy"><strong>{activeEntry ? (language === "en" ? "On the clock" : "Pointé") : (language === "en" ? "Off the clock" : "Non pointé")}</strong><small>{activeEntry ? elapsedLabel : (language === "en" ? "Select a work order first" : "Sélectionnez d'abord un ordre")}</small></div>{!activeEntry ? <><select required value={workOrderId} onChange={(event) => setWorkOrderId(event.target.value)} aria-label={language === "en" ? "Assign work order" : "Assigner un ordre de travail"}><option value="">{language === "en" ? "Select work order" : "Sélectionner un ordre"}</option>{jobs.filter((job) => job.status !== "Completed").map((job) => <option key={job.id} value={job.id}>{job.unit} · {job.issue}</option>)}</select><button disabled={!workOrderId} className="punch-button punch-in" onClick={() => onClockIn(workOrderId)}>{language === "en" ? "Clock In" : "Pointer"}</button></> : <button className="punch-button punch-out" onClick={onClockOut}>{language === "en" ? "Clock Out" : "Dépointer"}</button>}</div>;
+  return <div className={`punch-clock ${activeEntry ? "punch-active" : ""}`}><span className="punch-indicator" /><div className="punch-copy"><strong>{activeEntry ? (language === "en" ? "On the clock" : "Pointé") : (language === "en" ? "Off the clock" : "Non pointé")}</strong><small>{activeEntry ? elapsedLabel : (language === "en" ? "Select a work order first" : "Sélectionnez d'abord un ordre")}</small></div>{!activeEntry ? <><CustomSelect className="w-auto" value={workOrderId} onChange={setWorkOrderId} ariaLabel={language === "en" ? "Assign work order" : "Assigner un ordre de travail"} placeholder={language === "en" ? "Select work order" : "Sélectionner un ordre"} options={jobs.filter((job) => job.status !== "Completed").map((job) => ({ value: job.id, label: `${job.unit} · ${job.issue}` }))} /><button disabled={!workOrderId} className="punch-button punch-in" onClick={() => onClockIn(workOrderId)}>{language === "en" ? "Clock In" : "Pointer"}</button></> : <button className="punch-button punch-out" onClick={onClockOut}>{language === "en" ? "Clock Out" : "Dépointer"}</button>}</div>;
+}
+
+type SelectOption = { value: string; label: string };
+// Unit numbers are only unique per client, so identity/lookup keys must combine both fields.
+function unitKey(unit: { unit: string; client: string }): string {
+  return JSON.stringify([unit.unit, unit.client]);
+}
+// Native <select> triggers an OS-level picker on iOS/Android; a stray dismissal event from that overlay can bubble up and close parent modals. This component never renders a real <select>.
+function CustomSelect({ value, onChange, options, ariaLabel, placeholder, className, disabled, id, onSelect }: { value: string | undefined; onChange: (value: string) => void; options: SelectOption[]; ariaLabel?: string; placeholder?: string; className?: string; disabled?: boolean; id?: string; onSelect?: () => void }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const closeTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutside = (event: PointerEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutside, true);
+    return () => document.removeEventListener("pointerdown", closeOnOutside, true);
+  }, [open]);
+  useEffect(() => () => { if (closeTimer.current) window.clearTimeout(closeTimer.current); }, []);
+  const suppressGhostClick = useRef(false);
+  const selectOption = (optionValue: string) => {
+    onChange(optionValue);
+    suppressGhostClick.current = true;
+    onSelect?.();
+    // iOS can synthesize a "ghost click" on whatever is revealed once the tapped element is removed mid-gesture; keep the popover mounted one tick longer so that never lands on the form's submit button underneath.
+    if (closeTimer.current) window.clearTimeout(closeTimer.current);
+    closeTimer.current = window.setTimeout(() => setOpen(false), 0);
+  };
+  const selected = options.find((option) => option.value === value);
+  return (
+    <div
+      ref={wrapRef}
+      className={`relative inline-block w-full align-middle ${className ?? ""}`}
+      onClick={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
+      onTouchEnd={(event) => {
+        // If the tapped option was already removed from the DOM, iOS retargets its touchend to this
+        // still-mounted wrapper; preventDefault here (not just on the option) is what actually suppresses the ghost click.
+        if (suppressGhostClick.current) {
+          event.preventDefault();
+          suppressGhostClick.current = false;
+        }
+      }}
+    >
+      <button
+        type="button"
+        id={id}
+        disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={ariaLabel}
+        className="flex w-full items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-left text-sm font-medium text-inherit shadow-sm transition focus:outline-none focus:ring-2 focus:ring-red-600/20 disabled:cursor-not-allowed disabled:opacity-50"
+        onClick={(event) => {
+          event.stopPropagation();
+          setOpen((current) => !current);
+        }}
+      >
+        <span className="truncate">{selected?.label ?? placeholder ?? ""}</span>
+        <span className="text-xs text-slate-400" aria-hidden="true">▾</span>
+      </button>
+      {open && (
+        <div role="listbox" aria-label={ariaLabel} className="absolute left-0 top-full z-50 mt-1 max-h-60 w-full min-w-max overflow-auto rounded-md border border-slate-200 bg-white p-1 shadow-lg">
+          {options.map((option) => (
+            <button
+              type="button"
+              key={option.value}
+              role="option"
+              aria-selected={option.value === value}
+              className={`block w-full whitespace-nowrap rounded px-3 py-2 text-left text-sm ${option.value === value ? "bg-red-50 font-semibold text-red-600" : "text-slate-700 hover:bg-slate-50"}`}
+              onPointerDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                selectOption(option.value);
+              }}
+              onTouchEnd={(event) => {
+                // iOS only suppresses its synthetic ghost click if preventDefault is called on the touch event itself, not just the pointer event.
+                event.preventDefault();
+                event.stopPropagation();
+                suppressGhostClick.current = false;
+              }}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function Home() {
   const clientReady = useSyncExternalStore(() => () => undefined, () => true, () => false);
-  const [language, setLanguage] = useState<Language>(() => loadStored("rpm-diesel-language", "en" as Language));
+  const [language, setLanguage] = useState<Language>(() => loadStored("rpm-diesel-language", getDeviceLanguage()));
   const [activeUser, setActiveUser] = useState<string | null>(() => {
     const stored = loadStored<string | { name?: string } | null>("rpm-diesel-session", null);
     return typeof stored === "string" ? stored : stored?.name ?? null;
@@ -306,6 +414,10 @@ export default function Home() {
   const [unitSearch, setUnitSearch] = useState("");
   const [pmDueOnly, setPmDueOnly] = useState(false);
   const [clientSearch, setClientSearch] = useState("");
+  const [unitClientSearch, setUnitClientSearch] = useState("");
+  const [unitClientPickerOpen, setUnitClientPickerOpen] = useState(false);
+  const [workOrderUnitSearch, setWorkOrderUnitSearch] = useState("");
+  const [workOrderUnitPickerOpen, setWorkOrderUnitPickerOpen] = useState(false);
   const [clientData, setClientData] = useState<string[]>(() => loadStored("rpm-diesel-clients", defaultClients));
   const [editingClient, setEditingClient] = useState<string | null>(null);
   const [editingClientName, setEditingClientName] = useState("");
@@ -325,6 +437,7 @@ export default function Home() {
     usage: "",
     meterReading: "",
     currentMeter: "",
+    lastPmMeter: "",
     pmInterval: "25000",
     meterUnit: "KM" as Unit["meterUnit"],
     tech: "Unassigned",
@@ -332,6 +445,8 @@ export default function Home() {
     status: "In Progress" as JobStatus,
   });
   const [noteText, setNoteText] = useState("");
+  const [editingWorkOrderTitle, setEditingWorkOrderTitle] = useState(false);
+  const [workOrderTitleDraft, setWorkOrderTitleDraft] = useState("");
   const [lineItem, setLineItem] = useState({
     kind: "Part" as LineItem["kind"],
     partNumber: "",
@@ -364,11 +479,37 @@ export default function Home() {
     document.addEventListener("click", handleDayNavigation, true);
     return () => document.removeEventListener("click", handleDayNavigation, true);
   }, [punchPeriod, punchAnchorDate]);
+  useEffect(() => {
+    if (!unitClientPickerOpen) return;
+    const closeUnitClientPicker = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Element && !target.closest(".unit-client-picker, .unit-form-picker-label")) {
+        setUnitClientPickerOpen(false);
+        setUnitClientSearch("");
+      }
+    };
+    document.addEventListener("pointerdown", closeUnitClientPicker, true);
+    return () => document.removeEventListener("pointerdown", closeUnitClientPicker, true);
+  }, [unitClientPickerOpen]);
+  useEffect(() => {
+    if (!workOrderUnitPickerOpen) return;
+    const closeWorkOrderUnitPicker = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Element && !target.closest(".unit-form-picker-label")) {
+        setWorkOrderUnitPickerOpen(false);
+        setWorkOrderUnitSearch("");
+      }
+    };
+    document.addEventListener("pointerdown", closeWorkOrderUnitPicker, true);
+    return () => document.removeEventListener("pointerdown", closeWorkOrderUnitPicker, true);
+  }, [workOrderUnitPickerOpen]);
   const [editingTimeEntryId, setEditingTimeEntryId] = useState<string | null>(null);
   const [editingTimeEntry, setEditingTimeEntry] = useState<CloudTimeEntry | null>(null);
-  const [unitData, setUnitData] = useState<Unit[]>(units);
+  // Demo seed data must only be used offline; otherwise a stale local record with no cloud match is "preserved" forever by mergeRemoteRecords.
+  const [unitData, setUnitData] = useState<Unit[]>(hasSupabaseConfig ? [] : units);
   const [meterOverrides, setMeterOverrides] = useState<Record<string, Pick<Unit, "currentMeter" | "lastPmMeter" | "pmInterval" | "meterUnit">>>(() => loadStored("rpm-diesel-meter-overrides", {}));
-  const [jobData, setJobData] = useState<Job[]>(jobs);
+  const [jobMeterOverrides, setJobMeterOverrides] = useState<Record<string, number>>(() => loadStored("rpm-diesel-job-meter-overrides", {}));
+  const [jobData, setJobData] = useState<Job[]>(hasSupabaseConfig ? [] : jobs);
   const [timeEntries, setTimeEntries] = useState<CloudTimeEntry[]>([]);
   const [cloudReady, setCloudReady] = useState(!hasSupabaseConfig);
   const [cloudLoading, setCloudLoading] = useState(hasSupabaseConfig);
@@ -379,6 +520,41 @@ export default function Home() {
   const remoteUsersUpdate = useRef(false);
   const cloudPollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const cloudRefreshInFlight = useRef(false);
+  const unitDataRef = useRef(unitData);
+  const meterOverridesRef = useRef(meterOverrides);
+  const modalSwitchTimer = useRef<number | null>(null);
+  const submitArmedRef = useRef(false);
+  // Timestamp of the last CustomSelect option selection (technician/priority), fed by the onSelect prop;
+  // used as a time-based backstop against an iOS ghost click landing on the submit/close buttons right after.
+  const pickerActivityRef = useRef(0);
+  useEffect(() => () => { if (modalSwitchTimer.current) window.clearTimeout(modalSwitchTimer.current); }, []);
+  const jobMeterOverridesRef = useRef(jobMeterOverrides);
+  const actionErrorTimer = useRef<number | null>(null);
+  // iOS Safari can fire a stray backdrop mousedown when its native <select> picker dismisses; only close if press and release both land on the backdrop itself.
+  const backdropPressedSelf = useRef(false);
+  const armBackdropDismiss = (event: React.MouseEvent<HTMLDivElement>) => {
+    backdropPressedSelf.current = event.target === event.currentTarget;
+  };
+  const releaseBackdropDismiss = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (backdropPressedSelf.current && event.target === event.currentTarget) closeModal();
+    backdropPressedSelf.current = false;
+  };
+  // Same ghost-click hazard as the submit button: a picker option removed mid-gesture can leave a synthetic
+  // click landing on the × button with no real press ever having hit it.
+  const modalCloseArmedRef = useRef(false);
+  const armModalClose = (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    modalCloseArmedRef.current = true;
+  };
+  const handleModalCloseClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (!modalCloseArmedRef.current) return;
+    modalCloseArmedRef.current = false;
+    // eslint-disable-next-line react-hooks/purity -- runs only inside a real click handler, never during render
+    const elapsedSincePickerSelection = Date.now() - pickerActivityRef.current;
+    if (elapsedSincePickerSelection < 400) return;
+    closeModal();
+  };
   const t = (key: string) => translations[language][key] ?? ({
     day: language === "en" ? "Day" : "Jour",
     partNumber: language === "en" ? "Part number" : "Numéro de pièce",
@@ -402,6 +578,7 @@ export default function Home() {
     meterType: language === "en" ? "Meter type" : "Type de compteur",
     currentMileageHours: language === "en" ? "Current mileage / hours" : "Kilométrage / heures actuels",
     pmIntervalLabel: language === "en" ? "PM interval" : "Intervalle PM",
+    lastServiceMeter: language === "en" ? "Last service meter" : "Compteur du dernier service",
     seeAllPunches: language === "en" ? "See all punches" : "Voir tous les poinçons",
     seeMyPunches: language === "en" ? "See my punches" : "Voir mes poinçons",
     filterTechnician: language === "en" ? "Filter technician" : "Filtrer le technicien",
@@ -416,26 +593,26 @@ export default function Home() {
     addPmService: language === "en" ? "Add PM service" : "Ajouter le service PM",
     pmDueOnly: language === "en" ? "PM due only" : "PM requis seulement",
     pmRemaining: language === "en" ? "remaining" : "restant",
+    pmOverdueBy: language === "en" ? "overdue" : "en retard",
   }[key] ?? key);
   const reportActionError = (message: string) => {
     setActionError(message);
-    window.setTimeout(() => setActionError(null), 8000);
+    if (actionErrorTimer.current) window.clearTimeout(actionErrorTimer.current);
+    actionErrorTimer.current = window.setTimeout(() => {
+      setActionError(null);
+      actionErrorTimer.current = null;
+    }, 8000);
+  };
+  const offlineMutationKey = "rpm-diesel-offline-mutations";
+  const queueOfflineMutation = (payload: OfflinePayload) => {
+    if (typeof window === "undefined") return;
+    enqueueOfflineMutation(window.localStorage, offlineMutationKey, payload);
   };
   const todayLabel = new Intl.DateTimeFormat(language === "fr" ? "fr-CA" : "en-CA", { dateStyle: "medium" }).format(new Date());
   const formatCurrency = (amount: number) => new Intl.NumberFormat(language === "fr" ? "fr-CA" : "en-CA", {
     style: "currency",
     currency: "CAD",
   }).format(amount);
-  const exportJobs = () => {
-    const headers = [t("workOrder"), t("unitClient"), t("technician"), t("priority"), t("status"), t("updated")];
-    const rows = filteredJobs.map((job) => [job.id, `${job.unit} - ${job.client}`, job.tech, t(job.priority), t(job.status), job.updated]);
-    const csv = [headers, ...rows].map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(",")).join("\n");
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    link.download = `rpm-work-orders-${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(link.href);
-  };
   const greeting = new Date().getHours() < 12
     ? language === "en" ? "Good morning" : "Bonjour"
     : language === "en" ? "Good afternoon" : "Bon après-midi";
@@ -473,7 +650,10 @@ export default function Home() {
       const created = await createTimeEntry({ userId: activeUser, userName: activeUser, workOrderId, clockIn: new Date().toISOString() });
       if (created) setTimeEntries((current) => [created, ...current]);
       else setCloudError(t("cloudTimeMissing"));
-    } catch (error) { reportActionError(`Clock in failed: ${(error as Error).message}`); }
+    } catch (error) {
+      queueOfflineMutation({ kind: "clock-in", entry: { userId: activeUser, userName: activeUser, workOrderId, clockIn: new Date().toISOString() } });
+      reportActionError(`Clock in failed; punch queued for retry: ${(error as Error).message}`);
+    }
   };
   const clockOut = async () => {
     if (!activeTimeEntry) return;
@@ -482,14 +662,20 @@ export default function Home() {
     try {
       await completeTimeEntry(activeTimeEntry.id, clockOutTime.toISOString(), Number(totalHours.toFixed(2)));
       setTimeEntries((current) => current.map((entry) => entry.id === activeTimeEntry.id ? { ...entry, clockOut: clockOutTime.toISOString(), totalHours: Number(totalHours.toFixed(2)), status: "completed" } : entry));
-    } catch (error) { reportActionError(`Clock out failed: ${(error as Error).message}`); }
+    } catch (error) {
+      queueOfflineMutation({ kind: "clock-out", entry: { id: activeTimeEntry.id, clockOut: clockOutTime.toISOString(), totalHours: Number(totalHours.toFixed(2)) } });
+      reportActionError(`Clock out failed; punch queued for retry: ${(error as Error).message}`);
+    }
   };
   const adminClockIn = async () => {
     if (!isAdmin || !adminPunchUser || !adminPunchJob || timeEntries.some((entry) => entry.userId === adminPunchUser && entry.status === "active")) return;
     try {
       const created = await createTimeEntry({ userId: adminPunchUser, userName: adminPunchUser, workOrderId: adminPunchJob, clockIn: new Date().toISOString() });
       if (created) setTimeEntries((current) => [created, ...current]);
-    } catch (error) { reportActionError(`Technician clock in failed: ${(error as Error).message}`); }
+    } catch (error) {
+      queueOfflineMutation({ kind: "clock-in", entry: { userId: adminPunchUser, userName: adminPunchUser, workOrderId: adminPunchJob, clockIn: new Date().toISOString() } });
+      reportActionError(`Technician clock in failed; punch queued for retry: ${(error as Error).message}`);
+    }
   };
   const adminClockOut = async (entry: CloudTimeEntry) => {
     if (!isAdmin || entry.status !== "active") return;
@@ -498,7 +684,10 @@ export default function Home() {
     try {
       await completeTimeEntry(entry.id, clockOutTime.toISOString(), Number(totalHours.toFixed(2)));
       setTimeEntries((current) => current.map((item) => item.id === entry.id ? { ...item, clockOut: clockOutTime.toISOString(), totalHours: Number(totalHours.toFixed(2)), status: "completed" } : item));
-    } catch (error) { reportActionError(`Technician clock out failed: ${(error as Error).message}`); }
+    } catch (error) {
+      queueOfflineMutation({ kind: "clock-out", entry: { id: entry.id, clockOut: clockOutTime.toISOString(), totalHours: Number(totalHours.toFixed(2)) } });
+      reportActionError(`Technician clock out failed; punch queued for retry: ${(error as Error).message}`);
+    }
   };
   const addManualTime = async () => {
     const user = userAccounts.find((account) => account.name === manualTimeUser);
@@ -532,8 +721,7 @@ export default function Home() {
     const entry = timeEntries.find((candidate) => candidate.id === entryId);
     const linkedJob = entry?.workOrderId ? jobData.find((job) => job.id === entry.workOrderId) : undefined;
     if (linkedJob?.status === "Completed") {
-      setActionError(language === "en" ? "Punches linked to completed work orders cannot be deleted." : "Les poinçons liés aux ordres complétés ne peuvent pas être supprimés.");
-      window.setTimeout(() => setActionError(null), 8000);
+      reportActionError(language === "en" ? "Punches linked to completed work orders cannot be deleted." : "Les poinçons liés aux ordres complétés ne peuvent pas être supprimés.");
       return;
     }
     try {
@@ -557,6 +745,10 @@ export default function Home() {
   };
   const visibleNavItems = isAdmin ? [...navItems, { id: "users" as Section, label: "userManagement", icon: "♙" }] : navItems;
   const canManageWorkOrders = isAdmin;
+  const isMissingUnit = (unitId: string, client: string) => !unitData.some((unit) => unit.unit === unitId && unit.client === client);
+  const unitLabelForJob = (unitId: string, client: string) => !isMissingUnit(unitId, client)
+    ? unitId
+    : language === "en" ? `Archived Unit [${unitId}]` : `Unité archivée [${unitId}]`;
   const technicianOptions = ["Unassigned", ...userAccounts.filter((account) => account.active && account.isTechnician).map((account) => account.name)];
   const addUser = () => {
     const name = newUserName.trim();
@@ -582,10 +774,17 @@ export default function Home() {
     setPasswordTargetId(null);
     setManagedPassword("12345678");
   };
-  const removeUser = (id: string) => {
+  const removeUser = async (id: string) => {
     if (!isAdmin) return;
     const account = userAccounts.find((candidate) => candidate.id === id);
     if (!account || account.name === "Marc" || account.name === activeUser || !confirmDeletion("user")) return;
+    // Upsert-only saves can't delete a cloud row, so the removed user must be deleted remotely first or it reappears on the next sync.
+    try {
+      await removeUserAccount(id);
+    } catch (error) {
+      reportActionError(`User deletion failed: ${(error as Error).message}`);
+      return;
+    }
     setUserAccounts((current) => current.filter((candidate) => candidate.id !== id));
   };
   const saveClientEdit = () => {
@@ -600,10 +799,16 @@ export default function Home() {
     if (!isAdmin || !confirmDeletion("client")) return;
     setClientData((current) => current.filter((item) => item !== client));
   };
+  const addClientName = (rawName: string) => {
+    const name = rawName.trim();
+    if (!name) return;
+    if (!clientData.includes(name)) setClientData((current) => [name, ...current]);
+    setForm((current) => ({ ...current, client: name }));
+    setUnitClientSearch("");
+    setUnitClientPickerOpen(false);
+  };
   const addClient = (input: HTMLInputElement) => {
-    const name = input.value.trim();
-    if (!name || clientData.includes(name)) return;
-    setClientData((current) => [name, ...current]);
+    addClientName(input.value);
     input.value = "";
   };
   const changeOwnPassword = () => {
@@ -615,6 +820,9 @@ export default function Home() {
     setCurrentPassword(""); setNextPassword(""); setConfirmPassword(""); setPasswordError(""); setPasswordEditorOpen(false); setProfileMenuOpen(false);
   };
   useEffect(() => {
+    unitDataRef.current = unitData;
+  }, [unitData]);
+  useEffect(() => {
     window.localStorage.setItem("rpm-diesel-users", JSON.stringify(userAccounts));
   }, [userAccounts]);
   useEffect(() => {
@@ -624,15 +832,59 @@ export default function Home() {
     window.localStorage.setItem("rpm-diesel-meter-overrides", JSON.stringify(meterOverrides));
   }, [meterOverrides]);
   useEffect(() => {
+    window.localStorage.setItem("rpm-diesel-job-meter-overrides", JSON.stringify(jobMeterOverrides));
+  }, [jobMeterOverrides]);
+  useEffect(() => {
+    const flushOfflineMutations = async () => {
+      const pending = readOfflineMutations<OfflinePayload>(window.localStorage, offlineMutationKey);
+      if (!pending.length) return;
+      const remaining = [] as typeof pending;
+      for (const mutation of pending) {
+        try {
+          if (mutation.payload.kind === "jobs") {
+            const persistableJobs = mutation.payload.jobs.filter((job) => unitDataRef.current.some((unit) => unit.unit === job.unit && unit.client === job.client));
+            if (persistableJobs.length) await saveJobs(persistableJobs);
+          }
+          if (mutation.payload.kind === "units") await saveUnits(mutation.payload.units);
+          if (mutation.payload.kind === "clock-in") await createTimeEntry(mutation.payload.entry);
+          if (mutation.payload.kind === "clock-out") await completeTimeEntry(mutation.payload.entry.id, mutation.payload.entry.clockOut, mutation.payload.entry.totalHours);
+        } catch {
+          remaining.push(mutation);
+        }
+      }
+      if (remaining.length) window.localStorage.setItem(offlineMutationKey, JSON.stringify(remaining));
+      else clearOfflineMutations(window.localStorage, offlineMutationKey);
+    };
+    window.addEventListener("online", flushOfflineMutations);
+    void flushOfflineMutations();
+    return () => window.removeEventListener("online", flushOfflineMutations);
+  }, [activeUser]);
+  useEffect(() => {
+    meterOverridesRef.current = meterOverrides;
+  }, [meterOverrides]);
+  useEffect(() => {
+    jobMeterOverridesRef.current = jobMeterOverrides;
+  }, [jobMeterOverrides]);
+  useEffect(() => {
     let cancelled = false;
     if (!hasSupabaseConfig) return;
     Promise.all([loadFleetData(), loadUsers(), loadTimeEntries()]).then(([data, cloudUsers, cloudTimeEntries]) => {
       if (cancelled) return;
       if (data) {
-        remoteJobsUpdate.current = true;
-        remoteUnitsUpdate.current = true;
-        setJobData(data.jobs as Job[]);
-        setUnitData((data.units as Unit[]).map((unit) => ({ ...unit, ...(meterOverrides[unit.unit] ?? {}) })));
+        const remoteJobs = (data.jobs as Job[]).map((job) => jobMeterOverridesRef.current[job.id] == null ? job : { ...job, meterReading: jobMeterOverridesRef.current[job.id] });
+        const remoteUnits = (data.units as Unit[]).map((unit) => ({ ...unit, ...(meterOverridesRef.current[unitKey(unit)] ?? {}) }));
+        setJobData((current) => {
+          const merged = mergeRemoteRecords(current, remoteJobs, (job) => job.id);
+          if (recordsEqual(current, merged)) return current;
+          remoteJobsUpdate.current = true;
+          return merged;
+        });
+        setUnitData((current) => {
+          const merged = mergeRemoteRecords(current, remoteUnits, (unit) => unitKey(unit));
+          if (recordsEqual(current, merged)) return current;
+          remoteUnitsUpdate.current = true;
+          return merged;
+        });
       }
       if (cloudUsers?.length) { remoteUsersUpdate.current = true; setUserAccounts(cloudUsers as UserAccount[]); }
       if (cloudTimeEntries) setTimeEntries(cloudTimeEntries);
@@ -645,7 +897,7 @@ export default function Home() {
       setCloudLoading(false);
     });
     return () => { cancelled = true; };
-  }, [activeUser, meterOverrides]);
+  }, [activeUser]);
   useEffect(() => {
     if (!cloudReady || remoteUsersUpdate.current) { remoteUsersUpdate.current = false; return; }
     void saveUsers(userAccounts).catch((error: Error) => reportActionError(`User data save failed: ${error.message}`));
@@ -655,14 +907,16 @@ export default function Home() {
       remoteJobsUpdate.current = false;
       return;
     }
-    void saveJobs(jobData).catch((error: Error) => reportActionError(`Work order data save failed: ${error.message}`));
+    const persistableJobs = jobData.filter((job) => unitDataRef.current.some((unit) => unit.unit === job.unit && unit.client === job.client));
+    if (!persistableJobs.length) return;
+    void saveJobs(persistableJobs).catch((error: Error) => { queueOfflineMutation({ kind: "jobs", jobs: persistableJobs }); reportActionError(`Work order data save failed; changes queued for retry: ${error.message}`); });
   }, [jobData, cloudReady]);
   useEffect(() => {
     if (!cloudReady || remoteUnitsUpdate.current) {
       remoteUnitsUpdate.current = false;
       return;
     }
-    void saveUnits(unitData).catch((error: Error) => reportActionError(`Unit data save failed: ${error.message}`));
+    void saveUnits(unitData).catch((error: Error) => { queueOfflineMutation({ kind: "units", units: unitData }); reportActionError(`Unit data save failed; changes queued for retry: ${error.message}`); });
   }, [unitData, cloudReady]);
   useEffect(() => {
     if (!cloudReady || !hasSupabaseConfig) return;
@@ -670,12 +924,13 @@ export default function Home() {
       remoteUnitsUpdate.current = true;
       setUnitData((current) => {
         const unitId = change.record?.unit ?? change.oldRecord?.unit;
-        if (!unitId) return current;
-        if (change.eventType === "DELETE") return current.filter((unit) => unit.unit !== unitId);
+        const clientId = change.record?.client ?? change.oldRecord?.client;
+        if (!unitId || clientId == null) return current;
+        if (change.eventType === "DELETE") return current.filter((unit) => !(unit.unit === unitId && unit.client === clientId));
         if (!change.record) return current;
-        const nextUnit = change.record as Unit;
-        const existing = current.some((unit) => unit.unit === nextUnit.unit);
-        return existing ? current.map((unit) => unit.unit === nextUnit.unit ? nextUnit : unit) : [nextUnit, ...current];
+        const nextUnit = { ...change.record, ...(meterOverridesRef.current[unitKey(change.record)] ?? {}) } as Unit;
+        const existing = current.some((unit) => unit.unit === nextUnit.unit && unit.client === nextUnit.client);
+        return existing ? current.map((unit) => unit.unit === nextUnit.unit && unit.client === nextUnit.client && remoteWins(unit, nextUnit) ? nextUnit : unit) : [nextUnit, ...current];
       });
     };
     const applyJobChange = (change: RealtimeChange<CloudJob>) => {
@@ -686,8 +941,9 @@ export default function Home() {
         if (change.eventType === "DELETE") return current.filter((job) => job.id !== jobId);
         if (!change.record) return current;
         const nextJob = change.record as Job;
+        const resolvedJob = jobMeterOverridesRef.current[nextJob.id] == null ? nextJob : { ...nextJob, meterReading: jobMeterOverridesRef.current[nextJob.id] };
         const existing = current.some((job) => job.id === nextJob.id);
-        return existing ? current.map((job) => job.id === nextJob.id ? nextJob : job) : [nextJob, ...current];
+        return existing ? current.map((job) => job.id === resolvedJob.id && remoteWins(job, resolvedJob) ? resolvedJob : job) : [resolvedJob, ...current];
       });
     };
     const refreshFromCloud = () => {
@@ -695,10 +951,20 @@ export default function Home() {
       cloudRefreshInFlight.current = true;
       void Promise.all([loadFleetData(), loadUsers(), loadTimeEntries()]).then(([data, cloudUsers, cloudTimeEntries]) => {
         if (!data) return;
-        remoteJobsUpdate.current = true;
-        remoteUnitsUpdate.current = true;
-        setJobData(data.jobs as Job[]);
-        setUnitData((data.units as Unit[]).map((unit) => ({ ...unit, ...(meterOverrides[unit.unit] ?? {}) })));
+        const remoteJobs = (data.jobs as Job[]).map((job) => jobMeterOverridesRef.current[job.id] == null ? job : { ...job, meterReading: jobMeterOverridesRef.current[job.id] });
+        const remoteUnits = (data.units as Unit[]).map((unit) => ({ ...unit, ...(meterOverridesRef.current[unitKey(unit)] ?? {}) }));
+        setJobData((current) => {
+          const merged = mergeRemoteRecords(current, remoteJobs, (job) => job.id);
+          if (recordsEqual(current, merged)) return current;
+          remoteJobsUpdate.current = true;
+          return merged;
+        });
+        setUnitData((current) => {
+          const merged = mergeRemoteRecords(current, remoteUnits, (unit) => unitKey(unit));
+          if (recordsEqual(current, merged)) return current;
+          remoteUnitsUpdate.current = true;
+          return merged;
+        });
         if (cloudUsers?.length) { remoteUsersUpdate.current = true; setUserAccounts(cloudUsers as UserAccount[]); }
         if (cloudTimeEntries) setTimeEntries(cloudTimeEntries);
         setCloudError(null);
@@ -738,20 +1004,36 @@ export default function Home() {
       if (cloudPollTimer.current) clearInterval(cloudPollTimer.current);
       cloudPollTimer.current = null;
     };
-  }, [cloudReady, activeUser, meterOverrides]);
+  }, [cloudReady, activeUser]);
+  useEffect(() => {
+    document.documentElement.lang = language;
+  }, [language]);
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === "rpm-diesel-session") {
-        const stored = event.newValue ? JSON.parse(event.newValue) as string | { name?: string } : null;
-        setActiveUser(typeof stored === "string" ? stored : stored?.name ?? null);
+      try {
+        if (event.key === "rpm-diesel-session") {
+          const stored = event.newValue ? JSON.parse(event.newValue) as string | { name?: string } : null;
+          setActiveUser(typeof stored === "string" ? stored : stored?.name ?? null);
+        }
+        if (event.key === "rpm-diesel-language" && event.newValue) {
+          const nextLanguage = JSON.parse(event.newValue);
+          if (nextLanguage === "en" || nextLanguage === "fr") setLanguage(nextLanguage);
+        }
+        if (event.key === "rpm-diesel-users" && event.newValue) {
+          const nextUsers = JSON.parse(event.newValue);
+          if (Array.isArray(nextUsers)) setUserAccounts(nextUsers as UserAccount[]);
+        }
+        if (event.key === "rpm-diesel-clients" && event.newValue) {
+          const nextClients = JSON.parse(event.newValue);
+          if (Array.isArray(nextClients)) setClientData(nextClients as string[]);
+        }
+      } catch {
+        reportActionError(language === "en" ? "A shared browser update could not be applied." : "Une mise à jour partagée du navigateur n'a pas pu être appliquée.");
       }
-      if (event.key === "rpm-diesel-language" && event.newValue) setLanguage(JSON.parse(event.newValue) as Language);
-      if (event.key === "rpm-diesel-users" && event.newValue) setUserAccounts(JSON.parse(event.newValue) as UserAccount[]);
-      if (event.key === "rpm-diesel-clients" && event.newValue) setClientData(JSON.parse(event.newValue) as string[]);
     };
     window.addEventListener("storage", handleStorage);
     return () => window.removeEventListener("storage", handleStorage);
-  }, []);
+  }, [language]);
   const filteredJobs = jobFilter === "All"
     ? jobData.filter((job) => job.status.trim() !== "Completed")
     : jobData.filter((job) => job.status.trim() === jobFilter);
@@ -759,14 +1041,28 @@ export default function Home() {
     setJobFilter("All");
     setSection("jobs");
   };
-  const filteredUnits = useMemo(
-    () =>
-      unitData.filter((unit) =>
-        (!pmDueOnly || unit.overdue) && `${unit.unit} ${unit.vin} ${unit.client}`
-          .toLowerCase()
-          .includes(unitSearch.toLowerCase()),
-      ),
-    [unitData, unitSearch, pmDueOnly],
+  const meterSummaryForUnit = (unit: Unit) => {
+    const override = meterOverrides[unitKey(unit)];
+    const jobMeters = jobData.filter((job) => job.unit === unit.unit && job.client === unit.client).map((job) => jobMeterOverrides[job.id] ?? job.meterReading ?? Number.parseFloat(job.usage)).filter((meter): meter is number => meter != null && Number.isFinite(Number(meter))).map(Number).sort((left, right) => right - left);
+    const explicitCurrentMeter = override?.currentMeter ?? unit.currentMeter ?? null;
+    const currentMeter = explicitCurrentMeter ?? jobMeters[0] ?? null;
+    const previousJobMeter = jobMeters[1];
+    const baseline = override?.lastPmMeter ?? unit.lastPmMeter ?? previousJobMeter ?? currentMeter ?? 0;
+    const pmInterval = override?.pmInterval ?? unit.pmInterval ?? 25000;
+    const meterUnit = override?.meterUnit ?? unit.meterUnit ?? "KM";
+    const delta = currentMeter == null ? null : currentMeter - baseline;
+    const remaining = delta == null ? null : Math.max(0, pmInterval - delta);
+    const overdueBy = delta == null ? null : Math.max(0, delta - pmInterval);
+    return { currentMeter, baseline, pmInterval, meterUnit, remaining, overdueBy };
+  };
+  const pmDueForUnit = (unit: Unit) => {
+    const summary = meterSummaryForUnit(unit);
+    return summary.currentMeter != null && summary.currentMeter - summary.baseline >= summary.pmInterval;
+  };
+  const filteredUnits = unitData.filter((unit) =>
+    (!pmDueOnly || pmDueForUnit(unit)) && `${unit.unit} ${unit.vin} ${unit.client}`
+      .toLowerCase()
+      .includes(unitSearch.toLowerCase()),
   );
   const filteredClients = useMemo(() => clientData.filter((client) => client.toLowerCase().includes(clientSearch.toLowerCase())), [clientData, clientSearch]);
   if (!clientReady) {
@@ -781,7 +1077,7 @@ export default function Home() {
           <h1>{t("loginTitle")}</h1>
           <p className="login-subtitle">{t("loginSubtitle")}</p>
           <form onSubmit={signIn} className="login-form">
-            <label>{t("name")}<select value={loginName} onChange={(event) => setLoginName(event.target.value)}>{accounts.map((account) => <option key={account.id}>{account.name}</option>)}</select></label>
+            <label>{t("name")}<CustomSelect value={loginName} onChange={setLoginName} options={accounts.map((account) => ({ value: account.name, label: account.name }))} /></label>
             <label>{t("password")}<input type="password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} autoComplete="current-password" /></label>
             {loginError && <div className="login-error" role="alert"><strong>{language === "en" ? "Invalid password" : "Mot de passe invalide"}</strong><span>{t("invalidLogin")}</span></div>}
             <button className="primary-button" type="submit">{t("signIn")}</button>
@@ -833,11 +1129,12 @@ export default function Home() {
   ) => {
     setUnitData((current) =>
       current.map((unit) =>
-        unit.unit === job.unit
+        unit.unit === job.unit && unit.client === job.client
           ? {
               ...unit,
               client: job.client,
               usage,
+              updatedAt: new Date().toISOString(),
               ...(status === "Completed"
                 ? {
                     service: new Date().toISOString().slice(0, 10),
@@ -859,17 +1156,25 @@ export default function Home() {
     if (job) syncUnitFromJob(job, status);
     if (job) void writeActivityLog(activeUser ?? "Unknown", "status_changed", "work_order", id, { status });
     if (!job) return;
-    const updatedJob = { ...job, status, updated: "Just now" };
+    const updatedJob = { ...job, status, updated: "Just now", updatedAt: new Date().toISOString() };
     setJobData((current) => current.map((item) => item.id === id ? updatedJob : item));
     void saveJobs([updatedJob]).catch((error: Error) => reportActionError(`Work order update failed: ${error.message}`));
   };
   const updateJobRecord = (job: Job, field: "tech" | "priority" | "status" | "usage" | "issue", value: string) => {
-    const updatedJob = { ...job, [field]: value, updated: "Just now" } as Job;
+    if (isMissingUnit(job.unit, job.client)) {
+      reportActionError(language === "en"
+        ? `Work order ${job.id} cannot be edited until unit ${job.unit} is restored or relinked.`
+        : `L'ordre ${job.id} ne peut pas être modifié tant que l'unité ${job.unit} n'est pas restaurée ou reliée.`);
+      return job;
+    }
+    const updatedJob = { ...job, [field]: value, updated: "Just now", updatedAt: new Date().toISOString() } as Job;
     setJobData((current) => current.map((item) => item.id === job.id ? updatedJob : item));
     void saveJobs([updatedJob]).catch((error: Error) => reportActionError(`Work order update failed: ${error.message}`));
     return updatedJob;
   };
   const openModal = (kind: "job" | "unit") => {
+    setWorkOrderUnitSearch("");
+    setWorkOrderUnitPickerOpen(false);
     setForm({
       unit: "",
       client: "",
@@ -880,6 +1185,7 @@ export default function Home() {
       usage: "",
       meterReading: "",
       currentMeter: "",
+      lastPmMeter: "",
       pmInterval: "25000",
       meterUnit: "KM",
       tech: "Unassigned",
@@ -893,12 +1199,15 @@ export default function Home() {
   const openJobDetails = (job: Job) => {
     setDetailJobId(job.id);
     setNoteText("");
+    setEditingWorkOrderTitle(false);
+    setWorkOrderTitleDraft(job.issue);
     setLineItem({ kind: "Part", partNumber: "", description: "", quantity: "1", amount: "" });
     setModal("detail");
   };
   const openUnitEditor = (unit: Unit) => {
     if (modal === "history") return;
-    setEditingUnitId(unit.unit);
+    const storedMeter = meterOverrides[unitKey(unit)];
+    setEditingUnitId(unitKey(unit));
     setForm({
       unit: unit.unit,
       client: unit.client,
@@ -908,9 +1217,10 @@ export default function Home() {
       service: unit.service,
       usage: unit.usage,
       meterReading: "",
-      currentMeter: unit.currentMeter == null ? "" : String(unit.currentMeter),
-      pmInterval: String(unit.pmInterval),
-      meterUnit: unit.meterUnit,
+      currentMeter: (storedMeter?.currentMeter ?? unit.currentMeter) == null ? "" : String(storedMeter?.currentMeter ?? unit.currentMeter),
+      lastPmMeter: (storedMeter?.lastPmMeter ?? unit.lastPmMeter) == null ? "" : String(storedMeter?.lastPmMeter ?? unit.lastPmMeter),
+      pmInterval: String(storedMeter?.pmInterval ?? unit.pmInterval ?? 25000),
+      meterUnit: storedMeter?.meterUnit ?? unit.meterUnit,
       tech: "Unassigned",
       priority: "Normal",
       status: "In Progress",
@@ -921,16 +1231,28 @@ export default function Home() {
   const closeModal = () => setModal(null);
   const updateForm = (field: keyof typeof form, value: string) =>
     setForm((current) => ({ ...current, [field]: value }));
-  const selectUnit = (value: string) => {
-    if (value === "__add_new_unit__") {
+  const beginAddUnitInline = () => {
+    // Defer the modal swap so an iOS ghost-click can't land on whatever is revealed underneath mid-gesture.
+    if (modalSwitchTimer.current) window.clearTimeout(modalSwitchTimer.current);
+    modalSwitchTimer.current = window.setTimeout(() => {
       setReturnToJob(true);
       setModal("unit");
+    }, 0);
+  };
+  const selectUnit = (value: string) => {
+    if (value === "__add_new_unit__") {
+      beginAddUnitInline();
       return;
     }
-    const selectedUnit = unitData.find((unit) => unit.unit === value);
+    const normalizedValue = value.trim().toLowerCase();
+    const selectedUnit = unitData.find((unit) =>
+      unit.unit.toLowerCase() === normalizedValue
+      || unit.client.toLowerCase() === normalizedValue
+      || `${unit.unit} · ${unit.client}`.toLowerCase() === normalizedValue,
+    );
     setForm((current) => ({
       ...current,
-      unit: value,
+      unit: selectedUnit?.unit ?? value,
       client: selectedUnit?.client ?? "",
       usage: selectedUnit?.usage ?? "",
       meterReading: selectedUnit?.currentMeter == null ? "" : String(selectedUnit.currentMeter),
@@ -1062,49 +1384,96 @@ export default function Home() {
   };
   const completeJobWithMeter = async () => {
     if (!completionPrompt) return;
+    const validation = validateCompletion({ meterReading: completionPrompt.reading, unit: completionPrompt.job.unit, status: "Completed" });
+    if (!validation.valid) {
+      reportActionError(validation.errors.join(" "));
+      return;
+    }
     const reading = Number(completionPrompt.reading);
-    if (!Number.isFinite(reading) || reading < 0) return;
-    const updatedJob = { ...completionPrompt.job, status: "Completed" as JobStatus, meterReading: reading, updated: "Just now" };
+    const updatedJob = { ...completionPrompt.job, status: "Completed" as JobStatus, meterReading: reading, updated: "Just now", updatedAt: new Date().toISOString() };
+    const unit = unitData.find((item) => item.unit === updatedJob.unit && item.client === updatedJob.client);
+    try {
+      await saveJobs([updatedJob]);
+    } catch (error) {
+      reportActionError(`Work order completion failed: ${(error as Error).message}`);
+      return;
+    }
+    setJobMeterOverrides((current) => ({ ...current, [updatedJob.id]: reading }));
     setJobData((current) => current.map((item) => item.id === updatedJob.id ? updatedJob : item));
-    const unit = unitData.find((item) => item.unit === updatedJob.unit);
-    if (unit) setUnitData((current) => current.map((item) => item.unit === unit.unit ? { ...item, currentMeter: reading, overdue: reading - (item.lastPmMeter ?? item.currentMeter ?? reading) >= (item.pmInterval ?? 25000) } : item));
-    try { await saveJobs([updatedJob]); } catch (error) { reportActionError(`Work order completion failed: ${(error as Error).message}`); return; }
+    if (unit) setUnitData((current) => current.map((item) => item.unit === unit.unit && item.client === unit.client ? { ...item, currentMeter: reading, overdue: reading - (item.lastPmMeter ?? item.currentMeter ?? reading) >= (item.pmInterval ?? 25000) } : item));
     setCompletionPrompt(null);
   };
-  const addPmServiceLine = () => {
-    if (!detailJobId) return;
-    setJobData((current) => current.map((job) => job.id === detailJobId ? { ...job, lineItems: [...(job.lineItems ?? []), { id: createId(), kind: "Labor", partNumber: "PM", description: "Preventive maintenance service", quantity: 1, amount: 0 }], updated: "Just now" } : job));
-  };
-  const deleteJob = (id: string) => {
+  const deleteJob = async (id: string) => {
     if (!canManageWorkOrders || !confirmDeletion("workOrder")) return;
+    try {
+      await removeJob(id);
+    } catch (error) {
+      reportActionError(`Work order deletion failed: ${(error as Error).message}`);
+      return;
+    }
     setJobData((current) => current.filter((job) => job.id !== id));
-    void removeJob(id);
-    void writeActivityLog(activeUser ?? "Unknown", "deleted", "work_order", id);
+    void writeActivityLog(activeUser ?? "Unknown", "deleted", "work_order", id).catch((error: Error) => reportActionError(`Activity log failed: ${error.message}`));
     setModal(null);
     setDetailJobId(null);
   };
-  const deleteUnit = (unitId: string) => {
+  const deleteUnit = async (unitId: string) => {
     if (!isAdmin || !confirmDeletion("unit")) return;
-    setUnitData((current) => current.filter((unit) => unit.unit !== unitId));
-    void removeUnit(unitId);
-    void writeActivityLog(activeUser ?? "Unknown", "deleted", "unit", unitId);
+    const unit = unitData.find((item) => unitKey(item) === unitId);
+    if (!unit) return;
+    const linkedWorkOrder = jobData.find((job) => job.unit === unit.unit && job.client === unit.client);
+    if (linkedWorkOrder) {
+      reportActionError(language === "en"
+        ? `This unit cannot be deleted because it is referenced by work order ${linkedWorkOrder.id}. Archive it instead.`
+        : `Cette unité ne peut pas être supprimée car elle est liée à l'ordre ${linkedWorkOrder.id}. Archivez-la plutôt.`);
+      return;
+    }
+    try {
+      await removeUnit(unit.unit, unit.client);
+    } catch (error) {
+      reportActionError(`Unit deletion failed: ${(error as Error).message}`);
+      return;
+    }
+    setUnitData((current) => current.filter((item) => unitKey(item) !== unitId));
+    void writeActivityLog(activeUser ?? "Unknown", "deleted", "unit", unit.unit).catch((error: Error) => reportActionError(`Activity log failed: ${error.message}`));
     setModal(null);
     setEditingUnitId(null);
   };
-  const togglePm = (unitId: string) =>
+  const togglePm = (target: Unit) =>
     setUnitData((current) =>
       current.map((unit) =>
-        unit.unit === unitId ? { ...unit, overdue: !unit.overdue } : unit,
+        unit.unit === target.unit && unit.client === target.client ? { ...unit, overdue: !unit.overdue } : unit,
       ),
     );
   const submitForm = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const armed = submitArmedRef.current;
+    submitArmedRef.current = false;
+    // Reject a submit that wasn't preceded by a real pointerdown/Enter on the submit control: an iOS ghost click can fire a synthetic click on the submit button once a picker option underneath it is removed mid-gesture.
+    if (!armed) return;
+    // Belt-and-suspenders: iOS can dispatch a fully-formed synthetic pointerdown/click pair as part of the
+    // same ghost-click sequence, which would satisfy the check above too. A real user needs noticeably longer
+    // than this to move their finger off a picker and deliberately tap submit.
+    if (Date.now() - pickerActivityRef.current < 400) return;
     if (submitting) return;
     setSubmitting(true);
     try {
     if (modal === "job") {
-      if (!form.meterReading.trim() || !form.unit) {
-        setCloudError(language === "en" ? "Opening meter reading is required." : "La lecture du compteur à l'ouverture est obligatoire.");
+      const openingMeter = Number(form.meterReading);
+      if (!form.unit.trim() || !workOrderUnitSearch.trim()) {
+        reportActionError(language === "en" ? "Select a fleet unit before creating the work order." : "Sélectionnez une unité avant de créer l'ordre de travail.");
+        return;
+      }
+      if (!unitData.some((unit) => unit.unit === form.unit && unit.client === form.client)) {
+        // No DB-level FK enforces this anymore (unit numbers repeat across clients), so a real, unambiguous unit must be re-validated here.
+        reportActionError(language === "en" ? "That unit/client combination could not be found. Re-select the fleet unit." : "Cette combinaison d'unité et de client est introuvable. Resélectionnez l'unité.");
+        return;
+      }
+      if (!form.meterReading.trim() || !Number.isFinite(openingMeter) || openingMeter < 0) {
+        reportActionError(language === "en" ? "Enter a valid opening meter reading." : "Entrez une lecture de compteur valide à l'ouverture.");
+        return;
+      }
+      if (!form.issue.trim()) {
+        reportActionError(language === "en" ? "Enter a service request before creating the work order." : "Entrez une demande de service avant de créer l'ordre de travail.");
         return;
       }
       const newJob: Job = {
@@ -1117,9 +1486,10 @@ export default function Home() {
         issue: form.issue,
         updated: "Just now",
         usage: form.usage,
-        meterReading: Number(form.meterReading),
+        meterReading: openingMeter,
         notes: [],
         lineItems: [],
+        updatedAt: new Date().toISOString(),
       };
       try {
         await saveJobs([newJob]);
@@ -1128,35 +1498,54 @@ export default function Home() {
         return;
       }
       setJobData((current) => [newJob, ...current]);
-      const openingMeter = Number(form.meterReading);
-      const linkedUnit = unitData.find((unit) => unit.unit === newJob.unit);
+      setJobMeterOverrides((current) => ({ ...current, [newJob.id]: newJob.meterReading ?? Number(form.meterReading) }));
+      const linkedUnit = unitData.find((unit) => unit.unit === newJob.unit && unit.client === newJob.client);
       if (linkedUnit && Number.isFinite(openingMeter)) {
         const pmBaseline = linkedUnit.lastPmMeter ?? linkedUnit.currentMeter ?? openingMeter;
         const pmOverdue = openingMeter - pmBaseline >= (linkedUnit.pmInterval ?? 25000);
         const updatedUnit = { ...linkedUnit, currentMeter: openingMeter, overdue: pmOverdue };
-        setUnitData((current) => current.map((unit) => unit.unit === updatedUnit.unit ? updatedUnit : unit));
-        setMeterOverrides((current) => ({ ...current, [updatedUnit.unit]: { currentMeter: updatedUnit.currentMeter, lastPmMeter: updatedUnit.lastPmMeter, pmInterval: updatedUnit.pmInterval, meterUnit: updatedUnit.meterUnit } }));
+        setUnitData((current) => current.map((unit) => unit.unit === updatedUnit.unit && unit.client === updatedUnit.client ? updatedUnit : unit));
+        setMeterOverrides((current) => ({ ...current, [unitKey(updatedUnit)]: { currentMeter: updatedUnit.currentMeter, lastPmMeter: updatedUnit.lastPmMeter, pmInterval: updatedUnit.pmInterval, meterUnit: updatedUnit.meterUnit } }));
+        void saveUnits([updatedUnit]).catch((error: Error) => reportActionError(`Unit meter update failed: ${error.message}`));
       }
       syncUnitFromJob(newJob, newJob.status, newJob.usage);
       void writeActivityLog(activeUser ?? "Unknown", "created", "work_order", newJob.id, { unit: newJob.unit });
       setSection("jobs");
     }
     if (modal === "unit") {
+      const trimmedUnitId = form.unit.trim();
+      const trimmedClient = form.client.trim();
+      if (!editingUnitId && unitData.some((unit) => unit.unit === trimmedUnitId && unit.client === trimmedClient)) {
+        reportActionError(language === "en"
+          ? `Unit "${trimmedUnitId}" already exists for ${trimmedClient || "this client"}. Edit that unit directly instead of adding it again.`
+          : `L'unité « ${trimmedUnitId} » existe déjà pour ${trimmedClient || "ce client"}. Modifiez cette unité au lieu de l'ajouter à nouveau.`);
+        return;
+      }
+      const existingUnit = editingUnitId ? unitData.find((unit) => unitKey(unit) === editingUnitId) : undefined;
+      const currentMeter = form.currentMeter ? Number(form.currentMeter) : null;
+      const pmInterval = Number(form.pmInterval) || 25000;
+      const lastPmMeter = editingUnitId
+        ? (form.lastPmMeter ? Number(form.lastPmMeter) : existingUnit?.lastPmMeter ?? currentMeter)
+        : currentMeter;
+      const now = new Date();
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      const lastServiceMeterChanged = Boolean(editingUnitId && form.lastPmMeter && Number(form.lastPmMeter) !== existingUnit?.lastPmMeter);
       const newUnit = {
         unit: form.unit,
         vin: form.vin,
         client: form.client,
         type: form.type || "Fleet unit",
-        service: form.service || "Not serviced yet",
+        service: lastServiceMeterChanged ? today : (form.service || "Not serviced yet"),
         due: "Schedule PM",
-        overdue: false,
+        overdue: currentMeter != null && lastPmMeter != null ? currentMeter - lastPmMeter >= pmInterval : false,
         usage: form.currentMeter ? `${form.currentMeter} ${form.meterUnit}` : "Not recorded",
-        currentMeter: form.currentMeter ? Number(form.currentMeter) : null,
-        lastPmMeter: form.currentMeter ? Number(form.currentMeter) : null,
-        pmInterval: Number(form.pmInterval) || 25000,
+        currentMeter,
+        lastPmMeter,
+        pmInterval,
         meterUnit: form.meterUnit,
+        updatedAt: new Date().toISOString(),
       };
-      setMeterOverrides((current) => ({ ...current, [newUnit.unit]: { currentMeter: newUnit.currentMeter, lastPmMeter: newUnit.lastPmMeter, pmInterval: newUnit.pmInterval, meterUnit: newUnit.meterUnit } }));
+      setMeterOverrides((current) => ({ ...current, [unitKey(newUnit)]: { currentMeter: newUnit.currentMeter, lastPmMeter: newUnit.lastPmMeter, pmInterval: newUnit.pmInterval, meterUnit: newUnit.meterUnit } }));
       try {
         if (editingUnitId) {
           await saveUnits([newUnit]);
@@ -1170,7 +1559,7 @@ export default function Home() {
       setUnitData((current) =>
         editingUnitId
           ? current.map((unit) =>
-              unit.unit === editingUnitId ? newUnit : unit,
+              unitKey(unit) === editingUnitId ? newUnit : unit,
             )
           : [newUnit, ...current],
       );
@@ -1184,6 +1573,8 @@ export default function Home() {
           meterUnit: newUnit.meterUnit,
           usage: newUnit.usage,
         }));
+        setWorkOrderUnitSearch(newUnit.unit);
+        setWorkOrderUnitPickerOpen(false);
         setReturnToJob(false);
         setModal("job");
         return;
@@ -1265,9 +1656,7 @@ export default function Home() {
           {mobileNavOpen && <div className="mobile-nav-drawer" role="dialog" aria-label={t("workspace")}><div className="mobile-nav-drawer-header"><b>{t("workspace")}</b><button type="button" onClick={() => setMobileNavOpen(false)} aria-label={t("close")}>×</button></div>{visibleNavItems.map((item) => <button key={item.id} type="button" className={`mobile-drawer-item ${section === item.id ? "mobile-drawer-active" : ""}`} onClick={() => { setSection(item.id); setMobileNavOpen(false); }}><span>{item.icon}</span>{t(item.label)}</button>)}</div>}
           <div className="mobile-nav-select">
             <span className="mobile-nav-label">{t("section")}</span>
-            <select value={section} onChange={(event) => { setSection(event.target.value as Section); setMobileNavOpen(false); }} aria-label={t("chooseSection")}>
-              {visibleNavItems.map((item) => <option key={item.id} value={item.id}>{t(item.label)}</option>)}
-            </select>
+            <CustomSelect value={section} onChange={(value) => { setSection(value as Section); setMobileNavOpen(false); }} ariaLabel={t("chooseSection")} options={visibleNavItems.map((item) => ({ value: item.id, label: t(item.label) }))} />
           </div>
           <div className="page-heading">
             <div>
@@ -1327,10 +1716,10 @@ export default function Home() {
                 <div><b>{jobData.filter((job) => job.status === "Waiting on Parts").length} {t("adminPendingParts")}</b></div>
                 <button onClick={() => { setJobFilter("Waiting on Parts"); setSection("jobs"); }}>{t("reviewParts")}</button>
               </div>}
-              {unitData.filter((unit) => unit.overdue).length > 0 && <div className="alert-banner">
+              {unitData.filter((unit) => pmDueForUnit(unit)).length > 0 && <div className="alert-banner">
                 <span className="alert-icon">!</span>
                 <div>
-                  <b>{unitData.filter((unit) => unit.overdue).length} {t("overduePm")}</b>
+                  <b>{unitData.filter((unit) => pmDueForUnit(unit)).length} {t("overduePm")}</b>
                   <span>{language === "en" ? " Schedule service before they go back on the road." : " Planifiez le service avant leur retour sur la route."}</span>
                 </div>
                 <button onClick={() => setSection("units")}>{t("reviewUnits")}</button>
@@ -1381,19 +1770,19 @@ export default function Home() {
                       <span>{t("pmCompliance")}</span>
                       <b>
                         {unitData.length
-                          ? `${Math.round(((unitData.length - unitData.filter((unit) => unit.overdue).length) / unitData.length) * 1000) / 10}%`
+                          ? `${Math.round(((unitData.length - unitData.filter((unit) => pmDueForUnit(unit)).length) / unitData.length) * 1000) / 10}%`
                           : "0%"}
                       </b>
                     </div>
                     <div className="progress-track">
                       <div
                         style={{
-                          width: `${unitData.length ? ((unitData.length - unitData.filter((unit) => unit.overdue).length) / unitData.length) * 100 : 0}%`,
+                          width: `${unitData.length ? ((unitData.length - unitData.filter((unit) => pmDueForUnit(unit)).length) / unitData.length) * 100 : 0}%`,
                         }}
                       />
                     </div>
                     <p>
-                      {unitData.filter((unit) => unit.overdue).length} {t("overduePm")}
+                      {unitData.filter((unit) => pmDueForUnit(unit)).length} {t("overduePm")}
                     </p>
                   </div>
                 </div>
@@ -1407,8 +1796,8 @@ export default function Home() {
                   </div>
                   <MetricCard
                     label={t("techsOnRoad")}
-                    value={String(new Set(jobData.filter((job) => job.status !== "Completed" && job.tech !== "Unassigned").map((job) => job.tech)).size)}
-                    detail={language === "en" ? "Assigned technicians on active jobs" : "Techniciens assignés aux travaux actifs"}
+                    value={String(new Set(jobData.filter((job) => job.status !== "Completed" && job.tech !== "Unassigned" && timeEntries.some((entry) => entry.status === "active" && entry.userName === job.tech)).map((job) => job.tech)).size)}
+                    detail={language === "en" ? "Currently punched-in technicians on active jobs" : "Techniciens actuellement pointés sur des travaux actifs"}
                     tone="green"
                     icon="↗"
                   />
@@ -1445,7 +1834,7 @@ export default function Home() {
                       <span className={`activity-mark mark-${index}`} />
                       <div className="activity-copy">
                         <p>
-                          <b>{job.unit}</b> {language === "en" ? "was assigned to" : "a été assigné à"} <b>{job.tech}</b>
+                          <b>{unitLabelForJob(job.unit, job.client)}</b> {language === "en" ? "was assigned to" : "a été assigné à"} <b>{job.tech}</b>
                         </p>
                         <span>
                           {job.issue} · {job.updated}
@@ -1459,7 +1848,8 @@ export default function Home() {
                   <p className="card-kicker">{t("quickActions")}</p>
                   <h2>{t("quickQuestion")}</h2>
                   <button
-                    onClick={openJobsQueue}
+                    type="button"
+                    onClick={(event) => { event.stopPropagation(); openModal("job"); }}
                     className="quick-action"
                   >
                     <i>+</i>
@@ -1489,11 +1879,11 @@ export default function Home() {
               <div className="toolbar"><div><p className="card-kicker">{t("punchClock")}</p><h2>{t("punchClock")}</h2></div></div>
               <p className="punch-page-copy">{t("punchSubtitle")}</p>
               <PunchClock activeEntry={activeTimeEntry} jobs={jobData} language={language} onClockIn={clockIn} onClockOut={clockOut} />
-              {canManageWorkOrders && <><div className="manual-time-card"><div className="detail-section-heading"><h3>{t("addTechnicianTime")}</h3></div><div className="manual-time-form"><select value={manualTimeUser} onChange={(event) => setManualTimeUser(event.target.value)} aria-label={t("technician")}><option value="">{t("technician")}</option>{userAccounts.filter((account) => account.active && account.isTechnician).map((account) => <option key={account.id} value={account.name}>{account.name}</option>)}</select><select value={manualTimeJob} onChange={(event) => setManualTimeJob(event.target.value)} aria-label={t("workOrder")}><option value="">{t("noData")}</option>{jobData.filter((job) => job.status !== "Completed").map((job) => <option key={job.id} value={job.id}>{job.unit} · {job.issue}</option>)}</select><input type="number" min="0.01" step="0.01" value={manualTimeHours} onChange={(event) => setManualTimeHours(event.target.value)} placeholder={t("hoursDecimal")} aria-label={t("hoursDecimal")} /><button className="primary-button" onClick={addManualTime}>{t("add")}</button></div></div><div className="manual-time-card"><div className="detail-section-heading"><h3>{t("manageLivePunches")}</h3></div><div className="manual-time-form"><select value={adminPunchUser} onChange={(event) => setAdminPunchUser(event.target.value)} aria-label={t("technician")}><option value="">{t("technician")}</option>{userAccounts.filter((account) => account.active && account.isTechnician).map((account) => <option key={account.id} value={account.name}>{account.name}</option>)}</select><select value={adminPunchJob} onChange={(event) => setAdminPunchJob(event.target.value)} aria-label={t("workOrder")}><option value="">{t("noData")}</option>{jobData.filter((job) => job.status !== "Completed").map((job) => <option key={job.id} value={job.id}>{job.unit} · {job.issue}</option>)}</select><button className="primary-button" disabled={!adminPunchUser || !adminPunchJob} onClick={adminClockIn}>{t("clockInTechnician")}</button></div><div className="admin-active-punches">{timeEntries.filter((entry) => entry.status === "active" && entry.userId !== activeUser).map((entry) => <div className="admin-active-punch" key={entry.id}><span><strong>{entry.userName}</strong><small>{jobData.find((job) => job.id === entry.workOrderId)?.unit ?? t("noData")}</small></span><button className="punch-button punch-out" onClick={() => adminClockOut(entry)}>{t("clockOut")}</button></div>)}</div></div></>}
+              {canManageWorkOrders && <><div className="manual-time-card"><div className="detail-section-heading"><h3>{t("addTechnicianTime")}</h3></div><div className="manual-time-form"><CustomSelect value={manualTimeUser} onChange={setManualTimeUser} ariaLabel={t("technician")} placeholder={t("technician")} options={userAccounts.filter((account) => account.active && account.isTechnician).map((account) => ({ value: account.name, label: account.name }))} /><CustomSelect value={manualTimeJob} onChange={setManualTimeJob} ariaLabel={t("workOrder")} placeholder={t("noData")} options={jobData.filter((job) => job.status !== "Completed").map((job) => ({ value: job.id, label: `${job.unit} · ${job.issue}` }))} /><input type="number" min="0.01" step="0.01" value={manualTimeHours} onChange={(event) => setManualTimeHours(event.target.value)} placeholder={t("hoursDecimal")} aria-label={t("hoursDecimal")} /><button className="primary-button" onClick={addManualTime}>{t("add")}</button></div></div><div className="manual-time-card"><div className="detail-section-heading"><h3>{t("manageLivePunches")}</h3></div><div className="manual-time-form"><CustomSelect value={adminPunchUser} onChange={setAdminPunchUser} ariaLabel={t("technician")} placeholder={t("technician")} options={userAccounts.filter((account) => account.active && account.isTechnician).map((account) => ({ value: account.name, label: account.name }))} /><CustomSelect value={adminPunchJob} onChange={setAdminPunchJob} ariaLabel={t("workOrder")} placeholder={t("noData")} options={jobData.filter((job) => job.status !== "Completed").map((job) => ({ value: job.id, label: `${job.unit} · ${job.issue}` }))} /><button className="primary-button" disabled={!adminPunchUser || !adminPunchJob} onClick={adminClockIn}>{t("clockInTechnician")}</button></div><div className="admin-active-punches">{timeEntries.filter((entry) => entry.status === "active" && entry.userId !== activeUser).map((entry) => <div className="admin-active-punch" key={entry.id}><span><strong>{entry.userName}</strong><small>{jobData.find((job) => job.id === entry.workOrderId)?.unit ?? t("noData")}</small></span><button className="punch-button punch-out" onClick={() => adminClockOut(entry)}>{t("clockOut")}</button></div>)}</div></div></>}
               <div className="punch-history-section">
-                <div className="detail-section-heading punch-history-heading"><div><h3>{t("punchHistory")}</h3><span>{periodTimeEntries.length} {t("entries")} · {periodStart.toLocaleDateString(language === "fr" ? "fr-CA" : "en-CA")} - {new Date(periodEnd.getTime() - 86400000).toLocaleDateString(language === "fr" ? "fr-CA" : "en-CA")}</span></div><div className="punch-history-controls-row"><div className="punch-history-admin-controls">{isAdmin && <><button type="button" className="outline-button" onClick={() => { setAdminSeeAllPunches((current) => !current); setAdminPunchFilter("all"); }}>{adminSeeAllPunches ? t("seeMyPunches") : t("seeAllPunches")}</button>{adminSeeAllPunches && <select value={adminPunchFilter} onChange={(event) => setAdminPunchFilter(event.target.value)} aria-label={t("filterTechnician")}><option value="all">{t("filterTechnician")}</option>{userAccounts.filter((account) => account.active && account.isTechnician).map((account) => <option key={account.id} value={account.name}>{account.name}</option>)}</select>}</>}</div><div className="punch-period-controls"><button type="button" className="period-nav-button" onClick={() => { const next = new Date(`${punchAnchorDate}T12:00:00`); if (punchPeriod === "week") next.setDate(next.getDate() - 7); else next.setMonth(next.getMonth() - 1); setPunchAnchorDate(next.toISOString().slice(0, 10)); }} aria-label={t("previousPeriod")}>‹</button><input className="punch-date-picker" type="date" value={punchAnchorDate} onChange={(event) => setPunchAnchorDate(event.target.value)} aria-label={t("chooseDate")} /><button type="button" className="period-nav-button" onClick={() => { const next = new Date(`${punchAnchorDate}T12:00:00`); if (punchPeriod === "week") next.setDate(next.getDate() + 7); else next.setMonth(next.getMonth() + 1); setPunchAnchorDate(next.toISOString().slice(0, 10)); }} aria-label={t("nextPeriod")}>›</button><select className="punch-period-select" value={punchPeriod} onChange={(event) => setPunchPeriod(event.target.value as "day" | "week" | "month")} aria-label={t("punchHistory")}><option value="day">{t("day")}</option><option value="week">{t("week")}</option><option value="month">{t("month")}</option></select><button type="button" className="period-today-button" onClick={() => setPunchAnchorDate(new Date().toISOString().slice(0, 10))}>{t("currentPeriod")}</button></div></div></div>
+                <div className="detail-section-heading punch-history-heading"><div><h3>{t("punchHistory")}</h3><span>{periodTimeEntries.length} {t("entries")} · {periodStart.toLocaleDateString(language === "fr" ? "fr-CA" : "en-CA")} - {new Date(periodEnd.getTime() - 86400000).toLocaleDateString(language === "fr" ? "fr-CA" : "en-CA")}</span></div><div className="punch-history-controls-row"><div className="punch-history-admin-controls">{isAdmin && <><button type="button" className="outline-button" onClick={() => { setAdminSeeAllPunches((current) => !current); setAdminPunchFilter("all"); }}>{adminSeeAllPunches ? t("seeMyPunches") : t("seeAllPunches")}</button>{adminSeeAllPunches && <CustomSelect value={adminPunchFilter} onChange={setAdminPunchFilter} ariaLabel={t("filterTechnician")} options={[{ value: "all", label: t("filterTechnician") }, ...userAccounts.filter((account) => account.active && account.isTechnician).map((account) => ({ value: account.name, label: account.name }))]} />}</>}</div><div className="punch-period-controls"><button type="button" className="period-nav-button" onClick={() => { const next = new Date(`${punchAnchorDate}T12:00:00`); if (punchPeriod === "week") next.setDate(next.getDate() - 7); else next.setMonth(next.getMonth() - 1); setPunchAnchorDate(next.toISOString().slice(0, 10)); }} aria-label={t("previousPeriod")}>‹</button><input className="punch-date-picker" type="date" value={punchAnchorDate} onChange={(event) => setPunchAnchorDate(event.target.value)} aria-label={t("chooseDate")} /><button type="button" className="period-nav-button" onClick={() => { const next = new Date(`${punchAnchorDate}T12:00:00`); if (punchPeriod === "week") next.setDate(next.getDate() + 7); else next.setMonth(next.getMonth() + 1); setPunchAnchorDate(next.toISOString().slice(0, 10)); }} aria-label={t("nextPeriod")}>›</button><CustomSelect className="punch-period-select" value={punchPeriod} onChange={(value) => setPunchPeriod(value as "day" | "week" | "month")} ariaLabel={t("punchHistory")} options={[{ value: "day", label: t("day") }, { value: "week", label: t("week") }, { value: "month", label: t("month") }]} /><button type="button" className="period-today-button" onClick={() => setPunchAnchorDate(new Date().toISOString().slice(0, 10))}>{t("currentPeriod")}</button></div></div></div>
                 <div className="punch-day-groups">{punchGroups.map((group) => <div className={`punch-day-group ${group.dayKey === punchDayKey(new Date().toISOString()) ? "punch-day-current" : ""}`} key={group.dayKey}><strong>{group.dayKey === punchDayKey(new Date().toISOString()) ? `${t("today")} · ` : ""}{new Date(`${group.dayKey}T00:00:00`).toLocaleDateString(language === "fr" ? "fr-CA" : "en-CA", { weekday: "long", month: "long", day: "numeric" })}</strong><span>{group.entries.length} {t("entries")}</span></div>)}</div>
-                <div className="table-wrap"><table className="punch-history-table"><thead><tr><th>{t("punchedBy")}</th><th>{t("workOrder")}</th><th>{t("clockIn")}</th><th>{t("clockOut")}</th><th>{t("totalHours")}</th><th>{t("status")}</th>{canManageWorkOrders && <th />}</tr></thead><tbody>{visibleTimeEntries.length ? visibleTimeEntries.map((entry) => editingTimeEntryId === entry.id && editingTimeEntry ? <tr key={entry.id} className="time-entry-edit-row"><td><select value={editingTimeEntry.userName} onChange={(event) => setEditingTimeEntry({ ...editingTimeEntry, userId: event.target.value, userName: event.target.value })}>{userAccounts.filter((account) => account.active && account.isTechnician).map((account) => <option key={account.id} value={account.name}>{account.name}</option>)}</select></td><td><select value={editingTimeEntry.workOrderId ?? ""} onChange={(event) => setEditingTimeEntry({ ...editingTimeEntry, workOrderId: event.target.value || null })}><option value="">{t("noData")}</option>{jobData.map((job) => <option key={job.id} value={job.id}>{job.unit} · {job.issue}</option>)}</select></td><td><input type="datetime-local" value={editingTimeEntry.clockIn.slice(0, 16)} onChange={(event) => setEditingTimeEntry({ ...editingTimeEntry, clockIn: new Date(event.target.value).toISOString() })} /></td><td><input type="datetime-local" value={editingTimeEntry.clockOut ? editingTimeEntry.clockOut.slice(0, 16) : ""} onChange={(event) => setEditingTimeEntry({ ...editingTimeEntry, clockOut: event.target.value ? new Date(event.target.value).toISOString() : null, status: event.target.value ? "completed" : "active" })} /></td><td><input type="number" min="0" step="0.01" value={editingTimeEntry.totalHours ?? ""} onChange={(event) => setEditingTimeEntry({ ...editingTimeEntry, totalHours: event.target.value ? Number(event.target.value) : null })} /></td><td><span className={`time-status ${editingTimeEntry.status === "active" ? "time-active" : "time-completed"}`}>{editingTimeEntry.status === "active" ? t("activePunch") : t("Completed")}</span></td><td><div className="time-entry-actions"><button className="primary-button" onClick={saveTimeEntryEdit}>{t("save")}</button><button className="entry-delete" onClick={() => deleteTimeEntry(entry.id)}>{t("delete")}</button></div></td></tr> : <tr key={entry.id}><td><strong>{entry.userName}</strong></td><td>{entry.workOrderId ? (jobData.find((job) => job.id === entry.workOrderId)?.unit ?? entry.workOrderId) : t("noData")}</td><td>{new Date(entry.clockIn).toLocaleString()}</td><td>{entry.clockOut ? new Date(entry.clockOut).toLocaleString() : t("activePunch")}</td><td>{entry.totalHours == null ? t("activePunch") : `${entry.totalHours.toFixed(2)} h`}</td><td><span className={`time-status ${entry.status === "active" ? "time-active" : "time-completed"}`}>{entry.status === "active" ? t("activePunch") : t("Completed")}</span></td>{canManageWorkOrders && <td><div className="time-entry-actions"><button className="outline-button" onClick={() => startTimeEntryEdit(entry)}>{t("edit")}</button><button className="entry-delete" onClick={() => deleteTimeEntry(entry.id)}>{t("delete")}</button></div></td>}</tr>) : <tr><td colSpan={canManageWorkOrders ? 7 : 6} className="empty-history">{t("noPunches")}</td></tr>}</tbody></table></div>
+                <div className="table-wrap"><table className="punch-history-table"><thead><tr><th>{t("punchedBy")}</th><th>{t("workOrder")}</th><th>{t("clockIn")}</th><th>{t("clockOut")}</th><th>{t("totalHours")}</th><th>{t("status")}</th>{canManageWorkOrders && <th />}</tr></thead><tbody>{visibleTimeEntries.length ? visibleTimeEntries.map((entry) => editingTimeEntryId === entry.id && editingTimeEntry ? <tr key={entry.id} className="time-entry-edit-row"><td><CustomSelect value={editingTimeEntry.userName} onChange={(value) => setEditingTimeEntry({ ...editingTimeEntry, userId: value, userName: value })} options={userAccounts.filter((account) => account.active && account.isTechnician).map((account) => ({ value: account.name, label: account.name }))} /></td><td><CustomSelect value={editingTimeEntry.workOrderId ?? ""} onChange={(value) => setEditingTimeEntry({ ...editingTimeEntry, workOrderId: value || null })} placeholder={t("noData")} options={jobData.map((job) => ({ value: job.id, label: `${job.unit} · ${job.issue}` }))} /></td><td><input type="datetime-local" value={editingTimeEntry.clockIn.slice(0, 16)} onChange={(event) => setEditingTimeEntry({ ...editingTimeEntry, clockIn: new Date(event.target.value).toISOString() })} /></td><td><input type="datetime-local" value={editingTimeEntry.clockOut ? editingTimeEntry.clockOut.slice(0, 16) : ""} onChange={(event) => setEditingTimeEntry({ ...editingTimeEntry, clockOut: event.target.value ? new Date(event.target.value).toISOString() : null, status: event.target.value ? "completed" : "active" })} /></td><td><input type="number" min="0" step="0.01" value={editingTimeEntry.totalHours ?? ""} onChange={(event) => setEditingTimeEntry({ ...editingTimeEntry, totalHours: event.target.value ? Number(event.target.value) : null })} /></td><td><span className={`time-status ${editingTimeEntry.status === "active" ? "time-active" : "time-completed"}`}>{editingTimeEntry.status === "active" ? t("activePunch") : t("Completed")}</span></td><td><div className="time-entry-actions"><button className="primary-button" onClick={saveTimeEntryEdit}>{t("save")}</button><button className="entry-delete" onClick={() => deleteTimeEntry(entry.id)}>{t("delete")}</button></div></td></tr> : <tr key={entry.id}><td><strong>{entry.userName}</strong></td><td>{entry.workOrderId ? (jobData.find((job) => job.id === entry.workOrderId)?.unit ?? entry.workOrderId) : t("noData")}</td><td>{new Date(entry.clockIn).toLocaleString()}</td><td>{entry.clockOut ? new Date(entry.clockOut).toLocaleString() : t("activePunch")}</td><td>{entry.totalHours == null ? t("activePunch") : `${entry.totalHours.toFixed(2)} h`}</td><td><span className={`time-status ${entry.status === "active" ? "time-active" : "time-completed"}`}>{entry.status === "active" ? t("activePunch") : t("Completed")}</span></td>{canManageWorkOrders && <td><div className="time-entry-actions"><button className="outline-button" onClick={() => startTimeEntryEdit(entry)}>{t("edit")}</button><button className="entry-delete" onClick={() => deleteTimeEntry(entry.id)}>{t("delete")}</button></div></td>}</tr>) : <tr><td colSpan={canManageWorkOrders ? 7 : 6} className="empty-history">{t("noPunches")}</td></tr>}</tbody></table></div>
               </div>
             </section>
           )}
@@ -1587,7 +1977,6 @@ export default function Home() {
                     </button>
                   ))}
                 </div>
-                <button className="outline-button" onClick={exportJobs}>{t("export")}</button>
               </div>
               <div className="table-wrap">
                 <table>
@@ -1614,38 +2003,35 @@ export default function Home() {
                           <span className="work-description">{job.issue}</span>
                         </td>
                         <td className="unit-client-cell">
-                          <strong>{job.unit}</strong>
+                          <strong>{unitLabelForJob(job.unit, job.client)}</strong>
                           <span>{job.client}</span>
                         </td>
                         <td onClick={(event) => event.stopPropagation()}>
-                          {canManageWorkOrders ? <select
+                          {canManageWorkOrders ? <CustomSelect
                             className="inline-job-select technician-select"
                             value={job.tech}
-                            onChange={(event) => updateJobRecord(job, "tech", event.target.value)}
-                            aria-label={`${t("technician")} ${job.unit}`}
-                          >
-                            {Array.from(new Set([...technicianOptions, job.tech])).map((tech) => <option key={tech} value={tech}>{tech}</option>)}
-                          </select> : <span className="read-only-job-value">{job.tech}</span>}
+                            onChange={(value) => updateJobRecord(job, "tech", value)}
+                            ariaLabel={`${t("technician")} ${job.unit}`}
+                            options={Array.from(new Set([...technicianOptions, job.tech])).map((tech) => ({ value: tech, label: tech }))}
+                          /> : <span className="read-only-job-value">{job.tech}</span>}
                         </td>
                         <td onClick={(event) => event.stopPropagation()}>
-                          {canManageWorkOrders ? <select
+                          {canManageWorkOrders ? <CustomSelect
                             className={`inline-job-select priority-select priority-${job.priority.toLowerCase()}`}
                             value={job.priority}
-                            onChange={(event) => updateJobRecord(job, "priority", event.target.value)}
-                            aria-label={`${t("priority")} ${job.unit}`}
-                          >
-                            {(["High", "Normal", "Low"] as Job["priority"][]).map((priority) => <option key={priority} value={priority}>{t(priority)}</option>)}
-                          </select> : <span className={`read-only-job-value priority-${job.priority.toLowerCase()}`}>{t(job.priority)}</span>}
+                            onChange={(value) => updateJobRecord(job, "priority", value)}
+                            ariaLabel={`${t("priority")} ${job.unit}`}
+                            options={(["High", "Normal", "Low"] as Job["priority"][]).map((priority) => ({ value: priority, label: t(priority) }))}
+                          /> : <span className={`read-only-job-value priority-${job.priority.toLowerCase()}`}>{t(job.priority)}</span>}
                         </td>
                         <td onClick={(event) => event.stopPropagation()}>
-                          <select
+                          <CustomSelect
                             className="inline-job-select status-select"
                             value={job.status}
-                            onChange={(event) => setStatus(job.id, event.target.value as JobStatus)}
-                            aria-label={`${t("status")} ${job.unit}`}
-                          >
-                            {(["In Progress", "Waiting on Parts", "Waiting on Estimates", "Completed"] as JobStatus[]).map((status) => <option key={status} value={status}>{t(status)}</option>)}
-                          </select>
+                            onChange={(value) => setStatus(job.id, value as JobStatus)}
+                            ariaLabel={`${t("status")} ${job.unit}`}
+                            options={(["In Progress", "Waiting on Parts", "Waiting on Estimates", "Completed"] as JobStatus[]).map((status) => ({ value: status, label: t(status) }))}
+                          />
                         </td>
                         <td className="updated-cell">{job.updated}</td>
                         <td>
@@ -1681,7 +2067,7 @@ export default function Home() {
                 />
                 <MetricCard
                   label={t("unitsOverduePm")}
-                  value={String(unitData.filter((unit) => unit.overdue).length)}
+                  value={String(unitData.filter((unit) => pmDueForUnit(unit)).length)}
                   detail={t("requiresAttention")}
                   icon="!"
                 />
@@ -1714,7 +2100,7 @@ export default function Home() {
                   {filteredUnits.map((unit) => (
                     <div
                       className="unit-row"
-                      key={unit.unit}
+                      key={unitKey(unit)}
                     >
                       <div className="unit-avatar">{unit.unit.slice(0, 3)}</div>
                       <div className="unit-primary">
@@ -1733,24 +2119,20 @@ export default function Home() {
                       </div>
                       <div>
                         <label>{t("lastUsageLabel")}</label>
-                        <b>{unit.usage}</b>
+                        <b>{(() => { const summary = meterSummaryForUnit(unit); return summary.currentMeter == null ? unit.usage : `${summary.currentMeter} ${summary.meterUnit}`; })()}</b>
                       </div>
-                      <div className="unit-meter-summary">
-                        <label>PM / {unit.meterUnit}</label>
-                        <b>{unit.currentMeter ?? "-"} / {unit.pmInterval}</b>
-                        {unit.currentMeter != null && <small className="pm-remaining">{Math.max(0, (unit.lastPmMeter ?? unit.currentMeter) + (unit.pmInterval ?? 25000) - unit.currentMeter)} {unit.meterUnit} {t("pmRemaining")}</small>}
-                      </div>
+                      <div className="unit-meter-summary">{(() => { const summary = meterSummaryForUnit(unit); return <><label>PM / {summary.meterUnit}</label><b>{summary.currentMeter ?? "-"} / {summary.pmInterval}</b>{summary.overdueBy != null && summary.overdueBy > 0 ? <small className="pm-remaining pm-remaining-due">{summary.overdueBy} {summary.meterUnit} {t("pmOverdueBy")}</small> : summary.remaining != null && <small className="pm-remaining">{summary.remaining} {summary.meterUnit} {t("pmRemaining")}</small>}</>; })()}</div>
                       <div className="unit-due">
                         <button
                           type="button"
-                          className={`pm-toggle ${unit.overdue ? "pm-needed" : "pm-clear"}`}
+                          className={`pm-toggle ${pmDueForUnit(unit) ? "pm-needed" : "pm-clear"}`}
                           onClick={(event) => {
                             event.stopPropagation();
-                            togglePm(unit.unit);
+                            togglePm(unit);
                           }}
                           aria-label={`Toggle PM for ${unit.unit}`}
                         >
-                          <span>{unit.overdue ? t("pmNeeded") : t("pmClear")}</span>
+                          <span>{pmDueForUnit(unit) ? t("pmNeeded") : t("pmClear")}</span>
                         </button>
                         <small>{unit.due}</small>
                       </div>
@@ -1783,11 +2165,11 @@ export default function Home() {
             </>
           )}
           {modal === "history" && historyUnit && (
-            <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeModal(); }}>
+            <div className="modal-backdrop" role="presentation" onMouseDown={armBackdropDismiss} onMouseUp={releaseBackdropDismiss}>
               <div className="modal-card detail-modal unit-history-modal">
-                <div className="modal-header"><div><p className="card-kicker">{t("serviceHistory")}</p><h2>{historyUnit.unit}</h2><small>{historyUnit.client} · {historyUnit.type}</small></div><button type="button" className="modal-close" onClick={closeModal} aria-label={t("close")}>×</button></div>
-                <div className="detail-section-heading"><h3>{t("completedWorkOrders")}</h3><span>{jobData.filter((job) => job.unit === historyUnit.unit && job.status === "Completed").length}</span></div>
-                <div className="service-history-list">{jobData.filter((job) => job.unit === historyUnit.unit && job.status === "Completed").map((job) => <div className="service-history-row" key={job.id}><div><strong>{job.issue}</strong><small>{job.id} · {job.updated}</small></div><span>{job.tech}</span><b>{workedHoursFor(job.id)} h</b><button className="outline-button" onClick={() => openJobDetails(job)}>{language === "en" ? "Open" : "Ouvrir"}</button></div>)}{jobData.filter((job) => job.unit === historyUnit.unit && job.status === "Completed").length === 0 && <p className="empty-history">{language === "en" ? "No completed service history for this unit." : "Aucun historique de service complété pour cette unité."}</p>}</div>
+                <div className="modal-header"><div><p className="card-kicker">{t("serviceHistory")}</p><h2>{historyUnit.unit}</h2><small>{historyUnit.client} · {historyUnit.type}</small></div><button type="button" className="modal-close" onPointerDown={armModalClose} onClick={handleModalCloseClick} aria-label={t("close")}>×</button></div>
+                <div className="detail-section-heading"><h3>{t("completedWorkOrders")}</h3><span>{jobData.filter((job) => job.unit === historyUnit.unit && job.client === historyUnit.client && job.status === "Completed").length}</span></div>
+                <div className="service-history-list">{jobData.filter((job) => job.unit === historyUnit.unit && job.client === historyUnit.client && job.status === "Completed").map((job) => <div className="service-history-row" key={job.id}><div><strong>{job.issue}</strong><small>{job.id} · {job.updated}</small></div><span>{job.tech}</span><b>{workedHoursFor(job.id)} h</b><button className="outline-button" onClick={() => openJobDetails(job)}>{language === "en" ? "Open" : "Ouvrir"}</button></div>)}{jobData.filter((job) => job.unit === historyUnit.unit && job.client === historyUnit.client && job.status === "Completed").length === 0 && <p className="empty-history">{language === "en" ? "No completed service history for this unit." : "Aucun historique de service complété pour cette unité."}</p>}</div>
               </div>
             </div>
           )}
@@ -1795,20 +2177,51 @@ export default function Home() {
             <div
               className="modal-backdrop"
               role="presentation"
-              onMouseDown={(event) => {
-                if (event.target === event.currentTarget) closeModal();
-              }}
+              onMouseDown={armBackdropDismiss}
+              onMouseUp={releaseBackdropDismiss}
             >
               <div className="modal-card detail-modal">
-                <div className="modal-header">
-                  <div>
+                <div className="modal-header detail-modal-header">
+                  <div className="detail-modal-header-content">
                     <p className="card-kicker">{t("workOrderDetails")} {activeJob.id}</p>
-                    <h2>{activeJob.issue}</h2>
-                    <small>
-                      {activeJob.unit} · {activeJob.client} · {t("lastServiceUsage")}: {activeJob.usage}
-                    </small>
+                    <div className="detail-title-row">
+                      {editingWorkOrderTitle ? <input
+                        className="detail-title-editor"
+                        value={workOrderTitleDraft}
+                        onChange={(event) => setWorkOrderTitleDraft(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            const title = workOrderTitleDraft.trim();
+                            if (title) void updateJob("issue", title);
+                            setEditingWorkOrderTitle(false);
+                          }
+                          if (event.key === "Escape") {
+                            setWorkOrderTitleDraft(activeJob.issue);
+                            setEditingWorkOrderTitle(false);
+                          }
+                        }}
+                        autoFocus
+                      /> : <h2>{activeJob.issue}</h2>}
+                      {canManageWorkOrders && (editingWorkOrderTitle ? <div className="detail-title-actions"><button type="button" className="title-edit-button" onClick={() => { const title = workOrderTitleDraft.trim(); if (title) void updateJob("issue", title); setEditingWorkOrderTitle(false); }}>{t("save")}</button><button type="button" className="title-cancel-button" onClick={() => { setWorkOrderTitleDraft(activeJob.issue); setEditingWorkOrderTitle(false); }}>{t("cancel")}</button></div> : <button type="button" className="title-edit-button" onClick={() => { setWorkOrderTitleDraft(activeJob.issue); setEditingWorkOrderTitle(true); }}>{t("edit")}</button>)}
+                    </div>
+                    {(() => {
+                      const unit = unitData.find((item) => item.unit === activeJob.unit && item.client === activeJob.client);
+                      const summary = unit ? meterSummaryForUnit(unit) : null;
+                      const currentMeter = summary?.currentMeter ?? activeJob.meterReading;
+                      const meterUnit = summary?.meterUnit ?? unit?.meterUnit ?? "KM";
+                      const due = summary ? summary.currentMeter != null && summary.currentMeter - summary.baseline >= summary.pmInterval : false;
+                      return <div className="detail-meta-grid">
+                        <div><span>{t("workOrderDetails")}</span><strong>{activeJob.id}</strong></div>
+                        <div><span>{t("clientName")}</span><strong>{activeJob.client}</strong></div>
+                        <div><span>{t("unitNumber")}</span><strong className={isMissingUnit(activeJob.unit, activeJob.client) ? "missing-unit-badge" : ""}>{unitLabelForJob(activeJob.unit, activeJob.client)}</strong></div>
+                        <div><span>{t("currentMileageHours")}</span><strong>{currentMeter == null ? activeJob.usage : `${currentMeter} ${meterUnit}`}</strong></div>
+                        <div><span>{t("status")}</span><strong className={`detail-meta-pill status-${activeJob.status.toLowerCase().replaceAll(" ", "-")}`}>{t(activeJob.status)}</strong></div>
+                        <div><span>{t("priority")}</span><strong className={`detail-meta-pill priority-${activeJob.priority.toLowerCase()}`}>{t(activeJob.priority)}</strong></div>
+                        <div><span>PM</span><strong className={`detail-meta-pill ${due ? "detail-meta-due" : "detail-meta-clear"}`}>{due ? t("pmDue") : t("pmClear")}</strong></div>
+                      </div>;
+                    })()}
                     <span className="work-order-total-hours">{t("totalWorked")}: {workedHoursFor(activeJob.id)} h</span>
-                    {(() => { const unit = unitData.find((item) => item.unit === activeJob.unit); const due = unit && activeJob.meterReading != null && activeJob.meterReading - (unit.lastPmMeter ?? unit.currentMeter ?? activeJob.meterReading) >= (unit.pmInterval ?? 25000); return due ? <div className="cloud-banner cloud-warning work-order-pm-warning"><strong>{t("pmDue")}</strong><button type="button" className="outline-button" onClick={addPmServiceLine}>{t("addPmService")}</button></div> : null; })()}
                     <div className="work-order-punch-actions">
                       {activeTimeEntry?.workOrderId === activeJob.id ? <button type="button" className="punch-button punch-out" onClick={clockOut}>{t("clockOut")}</button> : <button type="button" className="punch-button punch-in" disabled={Boolean(activeTimeEntry)} onClick={() => clockIn(activeJob.id)}>{t("clockInThisWorkOrder")}</button>}
                     </div>
@@ -1816,86 +2229,51 @@ export default function Home() {
                   <button
                     type="button"
                     className="modal-close"
-                    onClick={closeModal}
+                    onPointerDown={armModalClose}
+                    onClick={handleModalCloseClick}
                     aria-label="Close details"
                   >
                     ×
                   </button>
                 </div>
-                <div className="detail-controls">
-                  <label>
-                    {t("serviceRequest")}
-                    <input
-                      value={activeJob.issue}
-                      onChange={(event) =>
-                        updateJob("issue", event.target.value)
-                      }
-                    />
-                  </label>
+                <div className="detail-controls detail-edit-controls">
                   <label>
                     {t("status")}
-                    <select
+                    <CustomSelect
                       value={activeJob.status}
-                      onChange={(event) =>
-                        updateJob("status", event.target.value)
-                      }
-                    >
-                      {(
+                      onChange={(value) => updateJob("status", value)}
+                      options={(
                         [
                           "In Progress",
                           "Waiting on Parts",
                           "Waiting on Estimates",
                           "Completed",
                         ] as JobStatus[]
-                      ).map((status) => (
-                        <option key={status} value={status}>{t(status)}</option>
-                      ))}
-                    </select>
+                      ).map((status) => ({ value: status, label: t(status) }))}
+                    />
                   </label>
                   <label>
                     {t("priority")}
-                    {canManageWorkOrders ? <select
+                    {canManageWorkOrders ? <CustomSelect
                       value={activeJob.priority}
-                      onChange={(event) =>
-                        updateJob("priority", event.target.value)
-                      }
-                    >
-                      {(["High", "Normal", "Low"] as Job["priority"][]).map(
-                        (priority) => (
-                          <option key={priority} value={priority}>{t(priority)}</option>
-                        ),
-                      )}
-                    </select> : <span className={`read-only-detail-value priority-${activeJob.priority.toLowerCase()}`}>{t(activeJob.priority)}</span>}
+                      onChange={(value) => updateJob("priority", value)}
+                      options={(["High", "Normal", "Low"] as Job["priority"][]).map((priority) => ({ value: priority, label: t(priority) }))}
+                    /> : <span className={`read-only-detail-value priority-${activeJob.priority.toLowerCase()}`}>{t(activeJob.priority)}</span>}
                   </label>
                   <label>
                     {t("technician")}
-                    {canManageWorkOrders ? <select
+                    {canManageWorkOrders ? <CustomSelect
                       value={activeJob.tech}
-                      onChange={(event) =>
-                        updateJob("tech", event.target.value)
-                      }
-                    >
-                      {Array.from(new Set([...technicianOptions, activeJob.tech])).map((tech) => (
-                        <option key={tech}>{tech}</option>
-                      ))}
-                    </select> : <span className="read-only-detail-value">{activeJob.tech}</span>}
-                  </label>
-                  <label>
-                    {t("lastServiceUsage")}
-                    <input
-                      value={activeJob.usage}
-                      onChange={(event) =>
-                        updateJob("usage", event.target.value)
-                      }
-                      placeholder={t("usageExample")}
-                    />
+                      onChange={(value) => updateJob("tech", value)}
+                      options={Array.from(new Set([...technicianOptions, activeJob.tech])).map((tech) => ({ value: tech, label: tech }))}
+                    /> : <span className="read-only-detail-value">{activeJob.tech}</span>}
                   </label>
                 </div>
-                <div className="detail-section work-order-time-section">
+                <div className="detail-section detail-section-card work-order-time-section">
                   <div className="detail-section-heading"><h3>{t("punchHistory")}</h3><span>{timeEntries.filter((entry) => entry.workOrderId === activeJob.id).length} {t("entries")}</span></div>
                   <div className="work-order-time-list">{timeEntries.filter((entry) => entry.workOrderId === activeJob.id).map((entry) => <div className="work-order-time-row" key={entry.id}><strong>{entry.userName}</strong><span>{new Date(entry.clockIn).toLocaleString()}</span><span>{entry.clockOut ? new Date(entry.clockOut).toLocaleString() : t("activePunch")}</span><b>{entry.totalHours == null ? t("activePunch") : `${entry.totalHours.toFixed(2)} h`}</b></div>)}{timeEntries.filter((entry) => entry.workOrderId === activeJob.id).length === 0 && <small className="empty-history">{t("noPunches")}</small>}</div>
                 </div>
-                <div className="detail-section">
+                <div className="detail-section detail-section-card">
                   <div className="detail-section-heading">
                     <h3>{t("notes")}</h3>
                     <span>{activeJob.notes?.length ?? 0} notes</span>
@@ -1935,7 +2313,7 @@ export default function Home() {
                     </button>
                   </div>
                 </div>
-                <div className="detail-section">
+                <div className="detail-section detail-section-card">
                   <div className="detail-section-heading">
                     <h3>{t("parts")}</h3>
                     <div className="line-item-summary">
@@ -2029,7 +2407,7 @@ export default function Home() {
                       />
                     </label>
                     <div className="line-item-fields">
-                      <label>
+                      <label className="unit-form-picker-label">
                         <span>{t("quantity")}</span>
                         <input
                           type="number"
@@ -2082,8 +2460,8 @@ export default function Home() {
           {completionPrompt && (
             <div className="modal-backdrop" role="presentation">
               <form className="modal-card completion-meter-modal" onSubmit={(event) => { event.preventDefault(); void completeJobWithMeter(); }}>
-                <div className="modal-header"><div><p className="card-kicker">{t("workOrderDetails")}</p><h2>{t("closingMeterReading")}</h2><small>{t("enterCurrentMeter")} ({unitData.find((unit) => unit.unit === completionPrompt.job.unit)?.meterUnit ?? "KM"})</small></div></div>
-                <div className="modal-fields"><label>{t("finalMeterReading")}<input autoFocus type="number" min="0" required value={completionPrompt.reading} onChange={(event) => setCompletionPrompt({ ...completionPrompt, reading: event.target.value })} /></label>{(() => { const unit = unitData.find((item) => item.unit === completionPrompt.job.unit); const reading = Number(completionPrompt.reading); const baseline = unit?.lastPmMeter ?? unit?.currentMeter ?? reading; return unit && Number.isFinite(reading) && reading - baseline >= (unit.pmInterval ?? 25000) ? <div className="cloud-banner cloud-warning">{t("pmIntervalExceeded")}: {reading - baseline} {unit.meterUnit} {t("sinceLastPm")}.</div> : null; })()}</div>
+                <div className="modal-header"><div><p className="card-kicker">{t("workOrderDetails")}</p><h2>{t("closingMeterReading")}</h2><small>{t("enterCurrentMeter")} ({unitData.find((unit) => unit.unit === completionPrompt.job.unit && unit.client === completionPrompt.job.client)?.meterUnit ?? "KM"})</small></div></div>
+                <div className="modal-fields"><label>{t("finalMeterReading")}<input autoFocus type="number" min="0" required value={completionPrompt.reading} onChange={(event) => setCompletionPrompt({ ...completionPrompt, reading: event.target.value })} /></label>{(() => { const unit = unitData.find((item) => item.unit === completionPrompt.job.unit && item.client === completionPrompt.job.client); const reading = Number(completionPrompt.reading); const baseline = unit?.lastPmMeter ?? unit?.currentMeter ?? reading; return unit && Number.isFinite(reading) && reading - baseline >= (unit.pmInterval ?? 25000) ? <div className="cloud-banner cloud-warning">{t("pmIntervalExceeded")}: {reading - baseline} {unit.meterUnit} {t("sinceLastPm")}.</div> : null; })()}</div>
                 <div className="modal-actions"><button type="button" className="outline-button" onClick={() => setCompletionPrompt(null)}>{t("cancel")}</button><button type="submit" className="primary-button">{t("completeWorkOrder")}</button></div>
               </form>
             </div>
@@ -2092,11 +2470,15 @@ export default function Home() {
             <div
               className="modal-backdrop"
               role="presentation"
-              onMouseDown={(event) => {
-                if (event.target === event.currentTarget) closeModal();
-              }}
+              onMouseDown={armBackdropDismiss}
+              onMouseUp={releaseBackdropDismiss}
             >
-              <form className="modal-card" onSubmit={submitForm}>
+              <form
+                className="modal-card"
+                noValidate
+                onSubmit={submitForm}
+                onKeyDownCapture={(event) => { if (event.key === "Enter") submitArmedRef.current = true; }}
+              >
                 <div className="modal-header">
                   <div>
                     <p className="card-kicker">
@@ -2117,7 +2499,8 @@ export default function Home() {
                   <button
                     type="button"
                     className="modal-close"
-                    onClick={closeModal}
+                    onPointerDown={armModalClose}
+                    onClick={handleModalCloseClick}
                     aria-label="Close modal"
                   >
                     ×
@@ -2126,26 +2509,29 @@ export default function Home() {
                 <div className="modal-fields">
                   {modal === "job" ? (
                     <>
-                      <label>
-                        {t("fleetUnit")}
-                        <select
-                          required
-                          value={form.unit}
-                          onChange={(event) => selectUnit(event.target.value)}
-                        >
-                          <option value="">
-                            {t("selectUnit")}
-                          </option>
-                          {unitData.map((unit) => (
-                            <option key={unit.unit} value={unit.unit}>
-                              {unit.unit} · {unit.client}
-                            </option>
-                          ))}
-                          <option value="__add_new_unit__">
+                      <div className="unit-form-picker-label form-field-group" onClick={(event) => event.stopPropagation()}>
+                        <label htmlFor="work-order-unit-picker">{t("fleetUnit")}</label>
+                        <div className="unit-form-picker">
+                          <input
+                            id="work-order-unit-picker"
+                            required
+                            value={workOrderUnitSearch}
+                            onFocus={(event) => { event.stopPropagation(); setWorkOrderUnitPickerOpen(true); }}
+                            onClick={(event) => event.stopPropagation()}
+                            onChange={(event) => { event.stopPropagation(); setWorkOrderUnitSearch(event.target.value); setWorkOrderUnitPickerOpen(true); }}
+                            placeholder={t("selectUnit")}
+                          />
+                          <button
+                            type="button"
+                            className="outline-button"
+                            onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); beginAddUnitInline(); }}
+                            onClick={(event) => { event.preventDefault(); event.stopPropagation(); }}
+                          >
                             {t("addNewUnitOption")}
-                          </option>
-                        </select>
-                      </label>
+                          </button>
+                        </div>
+                        {workOrderUnitPickerOpen && <div className="unit-client-suggestions" role="listbox" onClick={(event) => event.stopPropagation()}>{unitData.filter((unit) => `${unit.unit} ${unit.client}`.toLowerCase().includes(workOrderUnitSearch.toLowerCase())).slice(0, 8).map((unit) => <button type="button" key={unitKey(unit)} role="option" aria-selected={form.unit === unit.unit && form.client === unit.client} onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); setWorkOrderUnitSearch(unit.unit); setWorkOrderUnitPickerOpen(false); selectUnit(`${unit.unit} · ${unit.client}`); }}>{unit.unit} · {unit.client}</button>)}</div>}
+                      </div>
                       <label>
                         {t("currentMileageHours")} ({form.meterUnit})
                         <input
@@ -2168,29 +2554,27 @@ export default function Home() {
                           placeholder={t("describeIssue")}
                         />
                       </label>
-                      <label>
+                      <label onMouseDown={(event) => event.stopPropagation()}>
                         {t("technician")}
-                        <select
+                        <CustomSelect
                           value={form.tech}
-                          onChange={(event) =>
-                            updateForm("tech", event.target.value)
-                          }
-                        >
-                          {technicianOptions.map((tech) => <option key={tech} value={tech}>{tech}</option>)}
-                        </select>
+                          onChange={(value) => updateForm("tech", value)}
+                          onSelect={() => { pickerActivityRef.current = Date.now(); }}
+                          options={technicianOptions.map((tech) => ({ value: tech, label: tech }))}
+                        />
                       </label>
-                      <label>
+                      <label onMouseDown={(event) => event.stopPropagation()}>
                         {t("priority")}
-                        <select
+                        <CustomSelect
                           value={form.priority}
-                          onChange={(event) =>
-                            updateForm("priority", event.target.value)
-                          }
-                        >
-                          <option value="High">{t("High")}</option>
-                          <option value="Normal">{t("Normal")}</option>
-                          <option value="Low">{t("Low")}</option>
-                        </select>
+                          onChange={(value) => updateForm("priority", value)}
+                          onSelect={() => { pickerActivityRef.current = Date.now(); }}
+                          options={[
+                            { value: "High", label: t("High") },
+                            { value: "Normal", label: t("Normal") },
+                            { value: "Low", label: t("Low") },
+                          ]}
+                        />
                       </label>
                     </>
                   ) : (
@@ -2217,50 +2601,46 @@ export default function Home() {
                           placeholder={t("vinExample")}
                         />
                       </label>
-                      <label>
-                        {t("clientName")}
-                        <select
-                          required
-                          value={form.client}
-                          onChange={(event) =>
-                            updateForm("client", event.target.value)
-                          }
-                        >
-                          <option value="">{language === "en" ? "Select a client" : "Sélectionner un client"}</option>
-                          {Array.from(new Set([...clientData, ...(form.client && !clientData.includes(form.client) ? [form.client] : [])])).map((client) => <option key={client} value={client}>{client}</option>)}
-                        </select>
-                      </label>
-                      {editingUnitId && <label>
-                          {t("lastServiceDate")}
+                      <div className="unit-client-picker form-field-group" onClick={(event) => event.stopPropagation()}>
+                        <label htmlFor="unit-client-picker-input">{t("clientName")}</label>
+                        <div className="unit-client-picker-row">
                           <input
-                            type="date"
-                            value={form.service}
-                            onChange={(event) =>
-                              updateForm("service", event.target.value)
-                            }
+                            id="unit-client-picker-input"
+                            required
+                            value={form.client}
+                            onFocus={(event) => { event.stopPropagation(); setUnitClientPickerOpen(true); }}
+                            onClick={(event) => event.stopPropagation()}
+                            onChange={(event) => { event.stopPropagation(); setUnitClientSearch(event.target.value); setUnitClientPickerOpen(true); updateForm("client", event.target.value); }}
+                            placeholder={t("searchClients")}
                           />
-                        </label>}
-                      <label>
-                        {t("unitType")}
+                          <button type="button" className="outline-button" onClick={(event) => { event.stopPropagation(); addClientName(unitClientSearch || form.client); }}>{t("addClient")}</button>
+                        </div>
+                        {unitClientPickerOpen && unitClientSearch && <div className="unit-client-suggestions" role="listbox" onClick={(event) => event.stopPropagation()}>{clientData.filter((client) => client.toLowerCase().includes(unitClientSearch.toLowerCase())).slice(0, 8).map((client) => <button type="button" key={client} role="option" aria-selected={form.client === client} onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); setUnitClientSearch(""); setUnitClientPickerOpen(false); updateForm("client", client); }}>{client}</button>)}</div>}
+                      </div>
+                      <div className="unit-form-field">
+                        <label htmlFor="unit-type-input">{t("unitType")}</label>
                         <input
+                          id="unit-type-input"
                           value={form.type}
+                          onClick={(event) => event.stopPropagation()}
                           onChange={(event) =>
                             updateForm("type", event.target.value)
                           }
                           placeholder={t("typeExample")}
                         />
-                      </label>
-                      <label>
-                        {t("meterType")}
-                        <select value={form.meterUnit} onChange={(event) => updateForm("meterUnit", event.target.value)}>
-                          <option value="KM">KM</option>
-                          <option value="HRS">HRS</option>
-                        </select>
-                      </label>
+                      </div>
+                      <div className="unit-form-field">
+                        <label htmlFor="meter-type-select">{t("meterType")}</label>
+                        <CustomSelect id="meter-type-select" value={form.meterUnit} onChange={(value) => updateForm("meterUnit", value)} options={[{ value: "KM", label: "KM" }, { value: "HRS", label: "HRS" }]} />
+                      </div>
                       <label>
                         {t("currentMileageHours")}
                         <input required type="number" min="0" value={form.currentMeter} onChange={(event) => updateForm("currentMeter", event.target.value)} placeholder={form.meterUnit === "KM" ? "250000" : "5000"} />
                       </label>
+                      {editingUnitId && <label>
+                        {t("lastServiceMeter")}
+                        <input type="number" min="0" value={form.lastPmMeter} onChange={(event) => updateForm("lastPmMeter", event.target.value)} placeholder={form.meterUnit === "KM" ? "225000" : "4500"} />
+                      </label>}
                       <label>
                         {t("pmIntervalLabel")} ({form.meterUnit})
                         <input type="number" min="1" value={form.pmInterval} onChange={(event) => updateForm("pmInterval", event.target.value)} placeholder={form.meterUnit === "KM" ? "25000" : "500"} />
@@ -2285,7 +2665,13 @@ export default function Home() {
                   >
                     {t("cancel")}
                   </button>
-                  <button type="submit" disabled={submitting} className="primary-button">
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="primary-button create-work-order-submit"
+                    onPointerDown={(event) => { event.stopPropagation(); submitArmedRef.current = true; }}
+                    onPointerUp={(event) => event.stopPropagation()}
+                  >
                     {modal === "job" ? t("createWorkOrder") : t("saveUnit")}
                   </button>
                 </div>
