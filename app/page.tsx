@@ -2540,7 +2540,7 @@ export default function Home() {
                           min="0"
                           value={form.meterReading}
                           onChange={(event) => updateForm("meterReading", event.target.value)}
-                          placeholder={form.meterUnit === "KM" ? "250000" : "5000"}
+                          placeholder={form.meterUnit === "KM" ? "e.g. 250000" : "e.g. 5000"}
                         />
                       </label>
                       <label>
@@ -2635,15 +2635,15 @@ export default function Home() {
                       </div>
                       <label>
                         {t("currentMileageHours")}
-                        <input required type="number" min="0" value={form.currentMeter} onChange={(event) => updateForm("currentMeter", event.target.value)} placeholder={form.meterUnit === "KM" ? "250000" : "5000"} />
+                        <input required type="number" min="0" value={form.currentMeter} onChange={(event) => updateForm("currentMeter", event.target.value)} placeholder={form.meterUnit === "KM" ? "e.g. 250000" : "e.g. 5000"} />
                       </label>
                       {editingUnitId && <label>
                         {t("lastServiceMeter")}
-                        <input type="number" min="0" value={form.lastPmMeter} onChange={(event) => updateForm("lastPmMeter", event.target.value)} placeholder={form.meterUnit === "KM" ? "225000" : "4500"} />
+                        <input type="number" min="0" value={form.lastPmMeter} onChange={(event) => updateForm("lastPmMeter", event.target.value)} placeholder={form.meterUnit === "KM" ? "e.g. 225000" : "e.g. 4500"} />
                       </label>}
                       <label>
                         {t("pmIntervalLabel")} ({form.meterUnit})
-                        <input type="number" min="1" value={form.pmInterval} onChange={(event) => updateForm("pmInterval", event.target.value)} placeholder={form.meterUnit === "KM" ? "25000" : "500"} />
+                        <input type="number" min="1" value={form.pmInterval} onChange={(event) => updateForm("pmInterval", event.target.value)} placeholder={form.meterUnit === "KM" ? "e.g. 25000" : "e.g. 500"} />
                       </label>
                     </>
                   )}
