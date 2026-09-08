@@ -3575,11 +3575,16 @@ td small {
   }
 
   .toolbar {
+    flex-direction: column;
+    align-items: stretch;
     gap: 12px;
+    display: flex;
   }
 
   .toolbar .primary-button {
     white-space: nowrap;
+    width: 100%;
+    max-width: 100%;
     padding: 9px 10px;
     font-size: 10px;
   }
@@ -3587,10 +3592,24 @@ td small {
   .filter-row {
     align-items: flex-start;
     gap: 14px;
+    display: block;
+    overflow: hidden;
   }
 
   .filter-tabs {
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
     gap: 16px;
+    width: 100%;
+    max-width: 100%;
+    padding: 0 0 2px;
+    overflow-x: auto;
+  }
+
+  .filter-tabs button {
+    flex: none;
+    min-height: 44px;
+    padding-bottom: 11px;
   }
 
   .filter-row > .outline-button {

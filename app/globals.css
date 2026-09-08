@@ -1426,19 +1426,37 @@ td small {
   .period-today-button { flex: 1 1 auto; }
   .mobile-job-list { display:grid; gap:10px; }
   .toolbar {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
     gap: 12px;
   }
   .toolbar .primary-button {
+    width: 100%;
+    max-width: 100%;
     padding: 9px 10px;
     font-size: 10px;
     white-space: nowrap;
   }
   .filter-row {
+    display: block;
     align-items: flex-start;
     gap: 14px;
+    overflow: hidden;
   }
   .filter-tabs {
+    width: 100%;
+    max-width: 100%;
     gap: 16px;
+    padding: 0 0 2px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+  }
+  .filter-tabs button {
+    flex: 0 0 auto;
+    min-height: 44px;
+    padding-bottom: 11px;
   }
   .filter-row > .outline-button {
     display: none;
