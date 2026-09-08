@@ -449,6 +449,71 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   box-shadow: 0 0 0 4px #3780db1f;
 }
 
+.punch-history-admin-controls {
+  grid-area: 2 / 1 / auto / -1;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  display: flex;
+}
+
+.punch-history-admin-controls select {
+  border: 1px solid var(--line);
+  color: #344055;
+  background: #fff;
+  border-radius: 5px;
+  min-width: 140px;
+  min-height: 34px;
+  padding: 0 8px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.punch-history-section .punch-history-heading {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 0 !important;
+  display: flex !important;
+}
+
+.punch-history-controls-row {
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  display: flex;
+}
+
+.punch-history-controls-row .punch-history-admin-controls {
+  flex: auto;
+  grid-area: auto;
+  margin: 0;
+}
+
+.punch-history-controls-row .punch-period-controls {
+  flex: none;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  display: flex;
+}
+
+@media (min-width: 701px) {
+  .punch-history-section .punch-history-admin-controls {
+    grid-area: 2 / 1 / auto / -1;
+  }
+
+  .punch-history-section .punch-period-controls {
+    grid-area: 3 / 1;
+  }
+
+  .punch-history-section .punch-period-select-all {
+    grid-area: 3 / 2;
+  }
+}
+
 .mobile-nav-toggle, .mobile-nav-drawer {
   display: none;
 }
@@ -498,6 +563,37 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
     animation: .18s both modal-in;
     display: grid;
     position: relative;
+  }
+
+  .punch-history-section {
+    display: block !important;
+  }
+
+  .punch-history-section .punch-history-heading {
+    flex-direction: column;
+    gap: 8px;
+    display: flex !important;
+  }
+
+  .punch-history-controls-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .punch-history-controls-row .punch-period-controls {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .punch-history-admin-controls {
+    flex-wrap: wrap;
+    width: 100%;
+    margin-top: 0;
+  }
+
+  .punch-history-admin-controls .outline-button, .punch-history-admin-controls select {
+    flex: 150px;
+    min-height: 44px;
   }
 
   .mobile-nav-drawer-header {
@@ -1359,6 +1455,20 @@ button {
 
 .admin-active-punch .punch-button {
   height: 30px;
+}
+
+.filter-active-button {
+  color: #2b9862;
+  background: #eefaf3;
+  border-color: #b7dec5;
+}
+
+.pm-remaining {
+  color: #98a1b2;
+  margin-top: 4px;
+  font-size: 9px;
+  font-weight: 600;
+  display: block;
 }
 
 .emergency-button {

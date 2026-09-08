@@ -304,6 +304,7 @@ export default function Home() {
   const [submitting, setSubmitting] = useState(false);
   const [jobFilter, setJobFilter] = useState<"All" | JobStatus>("All");
   const [unitSearch, setUnitSearch] = useState("");
+  const [pmDueOnly, setPmDueOnly] = useState(false);
   const [clientSearch, setClientSearch] = useState("");
   const [clientData, setClientData] = useState<string[]>(() => loadStored("rpm-diesel-clients", defaultClients));
   const [editingClient, setEditingClient] = useState<string | null>(null);
@@ -345,6 +346,8 @@ export default function Home() {
   const [adminPunchJob, setAdminPunchJob] = useState("");
   const [punchPeriod, setPunchPeriod] = useState<"day" | "week" | "month">("week");
   const [punchAnchorDate, setPunchAnchorDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [adminSeeAllPunches, setAdminSeeAllPunches] = useState(false);
+  const [adminPunchFilter, setAdminPunchFilter] = useState("all");
   useEffect(() => {
     if (punchPeriod !== "day") return;
     const handleDayNavigation = (event: MouseEvent) => {
@@ -399,6 +402,9 @@ export default function Home() {
     meterType: language === "en" ? "Meter type" : "Type de compteur",
     currentMileageHours: language === "en" ? "Current mileage / hours" : "Kilométrage / heures actuels",
     pmIntervalLabel: language === "en" ? "PM interval" : "Intervalle PM",
+    seeAllPunches: language === "en" ? "See all punches" : "Voir tous les poinçons",
+    seeMyPunches: language === "en" ? "See my punches" : "Voir mes poinçons",
+    filterTechnician: language === "en" ? "Filter technician" : "Filtrer le technicien",
     pmIntervalExceeded: language === "en" ? "PM interval exceeded" : "Intervalle PM dépassé",
     sinceLastPm: language === "en" ? "since last PM" : "depuis le dernier PM",
     quantity: language === "en" ? "Qty" : "Qté",
@@ -408,7 +414,13 @@ export default function Home() {
     activeTechnicianPunches: language === "en" ? "Active technician punches" : "Poinçons actifs des techniciens",
     pmDue: language === "en" ? "PM Due" : "PM requis",
     addPmService: language === "en" ? "Add PM service" : "Ajouter le service PM",
+    pmDueOnly: language === "en" ? "PM due only" : "PM requis seulement",
+    pmRemaining: language === "en" ? "remaining" : "restant",
   }[key] ?? key);
+  const reportActionError = (message: string) => {
+    setActionError(message);
+    window.setTimeout(() => setActionError(null), 8000);
+  };
   const todayLabel = new Intl.DateTimeFormat(language === "fr" ? "fr-CA" : "en-CA", { dateStyle: "medium" }).format(new Date());
   const formatCurrency = (amount: number) => new Intl.NumberFormat(language === "fr" ? "fr-CA" : "en-CA", {
     style: "currency",
@@ -461,7 +473,7 @@ export default function Home() {
       const created = await createTimeEntry({ userId: activeUser, userName: activeUser, workOrderId, clockIn: new Date().toISOString() });
       if (created) setTimeEntries((current) => [created, ...current]);
       else setCloudError(t("cloudTimeMissing"));
-    } catch (error) { setCloudError(`Clock in failed: ${(error as Error).message}`); }
+    } catch (error) { reportActionError(`Clock in failed: ${(error as Error).message}`); }
   };
   const clockOut = async () => {
     if (!activeTimeEntry) return;
@@ -470,14 +482,14 @@ export default function Home() {
     try {
       await completeTimeEntry(activeTimeEntry.id, clockOutTime.toISOString(), Number(totalHours.toFixed(2)));
       setTimeEntries((current) => current.map((entry) => entry.id === activeTimeEntry.id ? { ...entry, clockOut: clockOutTime.toISOString(), totalHours: Number(totalHours.toFixed(2)), status: "completed" } : entry));
-    } catch (error) { setCloudError(`Clock out failed: ${(error as Error).message}`); }
+    } catch (error) { reportActionError(`Clock out failed: ${(error as Error).message}`); }
   };
   const adminClockIn = async () => {
     if (!isAdmin || !adminPunchUser || !adminPunchJob || timeEntries.some((entry) => entry.userId === adminPunchUser && entry.status === "active")) return;
     try {
       const created = await createTimeEntry({ userId: adminPunchUser, userName: adminPunchUser, workOrderId: adminPunchJob, clockIn: new Date().toISOString() });
       if (created) setTimeEntries((current) => [created, ...current]);
-    } catch (error) { setCloudError(`Technician clock in failed: ${(error as Error).message}`); }
+    } catch (error) { reportActionError(`Technician clock in failed: ${(error as Error).message}`); }
   };
   const adminClockOut = async (entry: CloudTimeEntry) => {
     if (!isAdmin || entry.status !== "active") return;
@@ -486,7 +498,7 @@ export default function Home() {
     try {
       await completeTimeEntry(entry.id, clockOutTime.toISOString(), Number(totalHours.toFixed(2)));
       setTimeEntries((current) => current.map((item) => item.id === entry.id ? { ...item, clockOut: clockOutTime.toISOString(), totalHours: Number(totalHours.toFixed(2)), status: "completed" } : item));
-    } catch (error) { setCloudError(`Technician clock out failed: ${(error as Error).message}`); }
+    } catch (error) { reportActionError(`Technician clock out failed: ${(error as Error).message}`); }
   };
   const addManualTime = async () => {
     const user = userAccounts.find((account) => account.name === manualTimeUser);
@@ -498,7 +510,7 @@ export default function Home() {
       const created = await createManualTimeEntry({ userId: user.name, userName: user.name, workOrderId: manualTimeJob || null, clockIn: clockInAt.toISOString(), clockOut: clockOutAt.toISOString(), totalHours: Number(hours.toFixed(2)) });
       if (created) setTimeEntries((current) => [created, ...current]);
       setManualTimeHours("");
-    } catch (error) { setCloudError(`Manual time entry failed: ${(error as Error).message}`); }
+    } catch (error) { reportActionError(`Manual time entry failed: ${(error as Error).message}`); }
   };
   const startTimeEntryEdit = (entry: CloudTimeEntry) => {
     setEditingTimeEntryId(entry.id);
@@ -512,7 +524,7 @@ export default function Home() {
       setEditingTimeEntryId(null);
       setEditingTimeEntry(null);
     } catch (error) {
-      setCloudError(`Time entry update failed: ${(error as Error).message}`);
+      reportActionError(`Time entry update failed: ${(error as Error).message}`);
     }
   };
   const deleteTimeEntry = async (entryId: string) => {
@@ -532,7 +544,7 @@ export default function Home() {
         setEditingTimeEntry(null);
       }
     } catch (error) {
-      setCloudError(`Time entry deletion failed: ${(error as Error).message}`);
+      reportActionError(`Time entry deletion failed: ${(error as Error).message}`);
     }
   };
   const currentAccount = userAccounts.find((account) => account.name === activeUser);
@@ -636,21 +648,21 @@ export default function Home() {
   }, [activeUser, meterOverrides]);
   useEffect(() => {
     if (!cloudReady || remoteUsersUpdate.current) { remoteUsersUpdate.current = false; return; }
-    void saveUsers(userAccounts);
+    void saveUsers(userAccounts).catch((error: Error) => reportActionError(`User data save failed: ${error.message}`));
   }, [userAccounts, cloudReady]);
   useEffect(() => {
     if (!cloudReady || remoteJobsUpdate.current) {
       remoteJobsUpdate.current = false;
       return;
     }
-    void saveJobs(jobData);
+    void saveJobs(jobData).catch((error: Error) => reportActionError(`Work order data save failed: ${error.message}`));
   }, [jobData, cloudReady]);
   useEffect(() => {
     if (!cloudReady || remoteUnitsUpdate.current) {
       remoteUnitsUpdate.current = false;
       return;
     }
-    void saveUnits(unitData);
+    void saveUnits(unitData).catch((error: Error) => reportActionError(`Unit data save failed: ${error.message}`));
   }, [unitData, cloudReady]);
   useEffect(() => {
     if (!cloudReady || !hasSupabaseConfig) return;
@@ -750,11 +762,11 @@ export default function Home() {
   const filteredUnits = useMemo(
     () =>
       unitData.filter((unit) =>
-        `${unit.unit} ${unit.vin} ${unit.client}`
+        (!pmDueOnly || unit.overdue) && `${unit.unit} ${unit.vin} ${unit.client}`
           .toLowerCase()
           .includes(unitSearch.toLowerCase()),
       ),
-    [unitData, unitSearch],
+    [unitData, unitSearch, pmDueOnly],
   );
   const filteredClients = useMemo(() => clientData.filter((client) => client.toLowerCase().includes(clientSearch.toLowerCase())), [clientData, clientSearch]);
   if (!clientReady) {
@@ -799,7 +811,9 @@ export default function Home() {
   if (punchPeriod === "day") periodEnd.setDate(periodEnd.getDate() + 1);
   else if (punchPeriod === "week") periodEnd.setDate(periodEnd.getDate() + 7);
   else periodEnd.setMonth(periodEnd.getMonth() + 1);
-  const scopedTimeEntries = currentAccount?.role === "Admin" ? timeEntries : timeEntries.filter((entry) => entry.userId === activeUser);
+  const scopedTimeEntries = currentAccount?.role === "Admin" && adminSeeAllPunches
+    ? timeEntries.filter((entry) => adminPunchFilter === "all" || entry.userId === adminPunchFilter)
+    : timeEntries.filter((entry) => entry.userId === activeUser);
   const periodTimeEntries = scopedTimeEntries
     .filter((entry) => {
       const timestamp = new Date(entry.clockIn).getTime();
@@ -847,12 +861,12 @@ export default function Home() {
     if (!job) return;
     const updatedJob = { ...job, status, updated: "Just now" };
     setJobData((current) => current.map((item) => item.id === id ? updatedJob : item));
-    void saveJobs([updatedJob]).catch((error: Error) => setCloudError(`Work order update failed: ${error.message}`));
+    void saveJobs([updatedJob]).catch((error: Error) => reportActionError(`Work order update failed: ${error.message}`));
   };
   const updateJobRecord = (job: Job, field: "tech" | "priority" | "status" | "usage" | "issue", value: string) => {
     const updatedJob = { ...job, [field]: value, updated: "Just now" } as Job;
     setJobData((current) => current.map((item) => item.id === job.id ? updatedJob : item));
-    void saveJobs([updatedJob]).catch((error: Error) => setCloudError(`Work order update failed: ${error.message}`));
+    void saveJobs([updatedJob]).catch((error: Error) => reportActionError(`Work order update failed: ${error.message}`));
     return updatedJob;
   };
   const openModal = (kind: "job" | "unit") => {
@@ -1054,7 +1068,7 @@ export default function Home() {
     setJobData((current) => current.map((item) => item.id === updatedJob.id ? updatedJob : item));
     const unit = unitData.find((item) => item.unit === updatedJob.unit);
     if (unit) setUnitData((current) => current.map((item) => item.unit === unit.unit ? { ...item, currentMeter: reading, overdue: reading - (item.lastPmMeter ?? item.currentMeter ?? reading) >= (item.pmInterval ?? 25000) } : item));
-    await saveJobs([updatedJob]);
+    try { await saveJobs([updatedJob]); } catch (error) { reportActionError(`Work order completion failed: ${(error as Error).message}`); return; }
     setCompletionPrompt(null);
   };
   const addPmServiceLine = () => {
@@ -1110,7 +1124,7 @@ export default function Home() {
       try {
         await saveJobs([newJob]);
       } catch (error) {
-        setCloudError(`Work order was not saved: ${(error as Error).message}`);
+        reportActionError(`Work order was not saved: ${(error as Error).message}`);
         return;
       }
       setJobData((current) => [newJob, ...current]);
@@ -1150,7 +1164,7 @@ export default function Home() {
           await saveUnits([newUnit]);
         }
       } catch (error) {
-        setCloudError(`Unit was not saved: ${(error as Error).message}`);
+        reportActionError(`Unit was not saved: ${(error as Error).message}`);
         return;
       }
       setUnitData((current) =>
@@ -1166,6 +1180,9 @@ export default function Home() {
           ...current,
           unit: newUnit.unit,
           client: newUnit.client,
+          meterReading: newUnit.currentMeter == null ? current.meterReading : String(newUnit.currentMeter),
+          meterUnit: newUnit.meterUnit,
+          usage: newUnit.usage,
         }));
         setReturnToJob(false);
         setModal("job");
@@ -1474,8 +1491,7 @@ export default function Home() {
               <PunchClock activeEntry={activeTimeEntry} jobs={jobData} language={language} onClockIn={clockIn} onClockOut={clockOut} />
               {canManageWorkOrders && <><div className="manual-time-card"><div className="detail-section-heading"><h3>{t("addTechnicianTime")}</h3></div><div className="manual-time-form"><select value={manualTimeUser} onChange={(event) => setManualTimeUser(event.target.value)} aria-label={t("technician")}><option value="">{t("technician")}</option>{userAccounts.filter((account) => account.active && account.isTechnician).map((account) => <option key={account.id} value={account.name}>{account.name}</option>)}</select><select value={manualTimeJob} onChange={(event) => setManualTimeJob(event.target.value)} aria-label={t("workOrder")}><option value="">{t("noData")}</option>{jobData.filter((job) => job.status !== "Completed").map((job) => <option key={job.id} value={job.id}>{job.unit} · {job.issue}</option>)}</select><input type="number" min="0.01" step="0.01" value={manualTimeHours} onChange={(event) => setManualTimeHours(event.target.value)} placeholder={t("hoursDecimal")} aria-label={t("hoursDecimal")} /><button className="primary-button" onClick={addManualTime}>{t("add")}</button></div></div><div className="manual-time-card"><div className="detail-section-heading"><h3>{t("manageLivePunches")}</h3></div><div className="manual-time-form"><select value={adminPunchUser} onChange={(event) => setAdminPunchUser(event.target.value)} aria-label={t("technician")}><option value="">{t("technician")}</option>{userAccounts.filter((account) => account.active && account.isTechnician).map((account) => <option key={account.id} value={account.name}>{account.name}</option>)}</select><select value={adminPunchJob} onChange={(event) => setAdminPunchJob(event.target.value)} aria-label={t("workOrder")}><option value="">{t("noData")}</option>{jobData.filter((job) => job.status !== "Completed").map((job) => <option key={job.id} value={job.id}>{job.unit} · {job.issue}</option>)}</select><button className="primary-button" disabled={!adminPunchUser || !adminPunchJob} onClick={adminClockIn}>{t("clockInTechnician")}</button></div><div className="admin-active-punches">{timeEntries.filter((entry) => entry.status === "active" && entry.userId !== activeUser).map((entry) => <div className="admin-active-punch" key={entry.id}><span><strong>{entry.userName}</strong><small>{jobData.find((job) => job.id === entry.workOrderId)?.unit ?? t("noData")}</small></span><button className="punch-button punch-out" onClick={() => adminClockOut(entry)}>{t("clockOut")}</button></div>)}</div></div></>}
               <div className="punch-history-section">
-                <select className="punch-period-select punch-period-select-all" value={punchPeriod} onChange={(event) => setPunchPeriod(event.target.value as "day" | "week" | "month")} aria-label={t("punchHistory")}><option value="day">{t("day")}</option><option value="week">{t("week")}</option><option value="month">{t("month")}</option></select>
-                <div className="detail-section-heading punch-history-heading"><div><h3>{t("punchHistory")}</h3><span>{periodTimeEntries.length} {t("entries")} · {periodStart.toLocaleDateString(language === "fr" ? "fr-CA" : "en-CA")} - {new Date(periodEnd.getTime() - 86400000).toLocaleDateString(language === "fr" ? "fr-CA" : "en-CA")}</span></div><div className="punch-period-controls"><button type="button" className="period-nav-button" onClick={() => { const next = new Date(`${punchAnchorDate}T12:00:00`); if (punchPeriod === "week") next.setDate(next.getDate() - 7); else next.setMonth(next.getMonth() - 1); setPunchAnchorDate(next.toISOString().slice(0, 10)); }} aria-label={t("previousPeriod")}>‹</button><input className="punch-date-picker" type="date" value={punchAnchorDate} onChange={(event) => setPunchAnchorDate(event.target.value)} aria-label={t("chooseDate")} /><button type="button" className="period-nav-button" onClick={() => { const next = new Date(`${punchAnchorDate}T12:00:00`); if (punchPeriod === "week") next.setDate(next.getDate() + 7); else next.setMonth(next.getMonth() + 1); setPunchAnchorDate(next.toISOString().slice(0, 10)); }} aria-label={t("nextPeriod")}>›</button><select className="punch-period-select" value={punchPeriod} onChange={(event) => setPunchPeriod(event.target.value as "week" | "month")} aria-label={t("punchHistory")}><option value="week">{t("week")}</option><option value="month">{t("month")}</option></select><button type="button" className="period-today-button" onClick={() => setPunchAnchorDate(new Date().toISOString().slice(0, 10))}>{t("currentPeriod")}</button></div></div>
+                <div className="detail-section-heading punch-history-heading"><div><h3>{t("punchHistory")}</h3><span>{periodTimeEntries.length} {t("entries")} · {periodStart.toLocaleDateString(language === "fr" ? "fr-CA" : "en-CA")} - {new Date(periodEnd.getTime() - 86400000).toLocaleDateString(language === "fr" ? "fr-CA" : "en-CA")}</span></div><div className="punch-history-controls-row"><div className="punch-history-admin-controls">{isAdmin && <><button type="button" className="outline-button" onClick={() => { setAdminSeeAllPunches((current) => !current); setAdminPunchFilter("all"); }}>{adminSeeAllPunches ? t("seeMyPunches") : t("seeAllPunches")}</button>{adminSeeAllPunches && <select value={adminPunchFilter} onChange={(event) => setAdminPunchFilter(event.target.value)} aria-label={t("filterTechnician")}><option value="all">{t("filterTechnician")}</option>{userAccounts.filter((account) => account.active && account.isTechnician).map((account) => <option key={account.id} value={account.name}>{account.name}</option>)}</select>}</>}</div><div className="punch-period-controls"><button type="button" className="period-nav-button" onClick={() => { const next = new Date(`${punchAnchorDate}T12:00:00`); if (punchPeriod === "week") next.setDate(next.getDate() - 7); else next.setMonth(next.getMonth() - 1); setPunchAnchorDate(next.toISOString().slice(0, 10)); }} aria-label={t("previousPeriod")}>‹</button><input className="punch-date-picker" type="date" value={punchAnchorDate} onChange={(event) => setPunchAnchorDate(event.target.value)} aria-label={t("chooseDate")} /><button type="button" className="period-nav-button" onClick={() => { const next = new Date(`${punchAnchorDate}T12:00:00`); if (punchPeriod === "week") next.setDate(next.getDate() + 7); else next.setMonth(next.getMonth() + 1); setPunchAnchorDate(next.toISOString().slice(0, 10)); }} aria-label={t("nextPeriod")}>›</button><select className="punch-period-select" value={punchPeriod} onChange={(event) => setPunchPeriod(event.target.value as "day" | "week" | "month")} aria-label={t("punchHistory")}><option value="day">{t("day")}</option><option value="week">{t("week")}</option><option value="month">{t("month")}</option></select><button type="button" className="period-today-button" onClick={() => setPunchAnchorDate(new Date().toISOString().slice(0, 10))}>{t("currentPeriod")}</button></div></div></div>
                 <div className="punch-day-groups">{punchGroups.map((group) => <div className={`punch-day-group ${group.dayKey === punchDayKey(new Date().toISOString()) ? "punch-day-current" : ""}`} key={group.dayKey}><strong>{group.dayKey === punchDayKey(new Date().toISOString()) ? `${t("today")} · ` : ""}{new Date(`${group.dayKey}T00:00:00`).toLocaleDateString(language === "fr" ? "fr-CA" : "en-CA", { weekday: "long", month: "long", day: "numeric" })}</strong><span>{group.entries.length} {t("entries")}</span></div>)}</div>
                 <div className="table-wrap"><table className="punch-history-table"><thead><tr><th>{t("punchedBy")}</th><th>{t("workOrder")}</th><th>{t("clockIn")}</th><th>{t("clockOut")}</th><th>{t("totalHours")}</th><th>{t("status")}</th>{canManageWorkOrders && <th />}</tr></thead><tbody>{visibleTimeEntries.length ? visibleTimeEntries.map((entry) => editingTimeEntryId === entry.id && editingTimeEntry ? <tr key={entry.id} className="time-entry-edit-row"><td><select value={editingTimeEntry.userName} onChange={(event) => setEditingTimeEntry({ ...editingTimeEntry, userId: event.target.value, userName: event.target.value })}>{userAccounts.filter((account) => account.active && account.isTechnician).map((account) => <option key={account.id} value={account.name}>{account.name}</option>)}</select></td><td><select value={editingTimeEntry.workOrderId ?? ""} onChange={(event) => setEditingTimeEntry({ ...editingTimeEntry, workOrderId: event.target.value || null })}><option value="">{t("noData")}</option>{jobData.map((job) => <option key={job.id} value={job.id}>{job.unit} · {job.issue}</option>)}</select></td><td><input type="datetime-local" value={editingTimeEntry.clockIn.slice(0, 16)} onChange={(event) => setEditingTimeEntry({ ...editingTimeEntry, clockIn: new Date(event.target.value).toISOString() })} /></td><td><input type="datetime-local" value={editingTimeEntry.clockOut ? editingTimeEntry.clockOut.slice(0, 16) : ""} onChange={(event) => setEditingTimeEntry({ ...editingTimeEntry, clockOut: event.target.value ? new Date(event.target.value).toISOString() : null, status: event.target.value ? "completed" : "active" })} /></td><td><input type="number" min="0" step="0.01" value={editingTimeEntry.totalHours ?? ""} onChange={(event) => setEditingTimeEntry({ ...editingTimeEntry, totalHours: event.target.value ? Number(event.target.value) : null })} /></td><td><span className={`time-status ${editingTimeEntry.status === "active" ? "time-active" : "time-completed"}`}>{editingTimeEntry.status === "active" ? t("activePunch") : t("Completed")}</span></td><td><div className="time-entry-actions"><button className="primary-button" onClick={saveTimeEntryEdit}>{t("save")}</button><button className="entry-delete" onClick={() => deleteTimeEntry(entry.id)}>{t("delete")}</button></div></td></tr> : <tr key={entry.id}><td><strong>{entry.userName}</strong></td><td>{entry.workOrderId ? (jobData.find((job) => job.id === entry.workOrderId)?.unit ?? entry.workOrderId) : t("noData")}</td><td>{new Date(entry.clockIn).toLocaleString()}</td><td>{entry.clockOut ? new Date(entry.clockOut).toLocaleString() : t("activePunch")}</td><td>{entry.totalHours == null ? t("activePunch") : `${entry.totalHours.toFixed(2)} h`}</td><td><span className={`time-status ${entry.status === "active" ? "time-active" : "time-completed"}`}>{entry.status === "active" ? t("activePunch") : t("Completed")}</span></td>{canManageWorkOrders && <td><div className="time-entry-actions"><button className="outline-button" onClick={() => startTimeEntryEdit(entry)}>{t("edit")}</button><button className="entry-delete" onClick={() => deleteTimeEntry(entry.id)}>{t("delete")}</button></div></td>}</tr>) : <tr><td colSpan={canManageWorkOrders ? 7 : 6} className="empty-history">{t("noPunches")}</td></tr>}</tbody></table></div>
               </div>
@@ -1692,7 +1708,7 @@ export default function Home() {
                       placeholder={language === "en" ? "Search by unit, VIN, or client name..." : "Rechercher une unité, un NIV ou un client..."}
                     />
                   </div>
-                  <button className="outline-button" onClick={() => setUnitSearch("")}>{t("filters")}</button>
+                  <button className={`outline-button ${pmDueOnly ? "filter-active-button" : ""}`} onClick={() => setPmDueOnly((current) => !current)}>{pmDueOnly ? t("pmDueOnly") : t("filters")}</button>
                 </div>
                 <div className="unit-list">
                   {filteredUnits.map((unit) => (
@@ -1722,6 +1738,7 @@ export default function Home() {
                       <div className="unit-meter-summary">
                         <label>PM / {unit.meterUnit}</label>
                         <b>{unit.currentMeter ?? "-"} / {unit.pmInterval}</b>
+                        {unit.currentMeter != null && <small className="pm-remaining">{Math.max(0, (unit.lastPmMeter ?? unit.currentMeter) + (unit.pmInterval ?? 25000) - unit.currentMeter)} {unit.meterUnit} {t("pmRemaining")}</small>}
                       </div>
                       <div className="unit-due">
                         <button
