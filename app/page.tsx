@@ -9,7 +9,7 @@ type Section = "overview" | "jobs" | "units" | "users" | "clients" | "punch";
 type Language = "en" | "fr";
 type UserAccount = { id: string; name: string; role: "Admin" | "Technician"; password: string; active: boolean; isTechnician: boolean };
 type JobStatus =
-  "In Progress" | "Waiting on Parts" | "Waiting on Estimates" | "Completed";
+  "Scheduled" | "In Progress" | "Waiting on Parts" | "Waiting on Estimates" | "Ready for Invoicing" | "Completed";
 type Note = { id: string; text: string; author: string; createdAt: string };
 type LineItem = {
   id: string;
@@ -195,24 +195,6 @@ const translations: Record<Language, Record<string, string>> = {
   },
 };
 
-`
-function loadStored<T>(key: string, fallback: T): T {
-  if (typeof window === "undefined") return fallback;
-  try {
-    //
-      previousPeriod: "Previous period", nextPeriod: "Next period", chooseDate: "Choose date", currentPeriod: "Current period", day: "Day",
-    return stored ? (JSON.parse(stored) as T) : fallback;
-    workOrders: "WORK ORDERS", activeJobs: "Active Jobs", totalInProgress: "Total in progress", waitingParts: "Waiting on parts", waitingEstimates: "Waiting on estimates", fleetHealth: "FLEET HEALTH", unitStatus: "Unit Status", totalUnits: "Total units repertoried", fleetRecords: "All fleet records up to date", pmCompliance: "PM compliance", overduePm: "units overdue for PM", fieldOperations: "FIELD OPERATIONS", fieldService: "Field Service", techsOnRoad: "Technicians on road", unassignedCalls: "Unassigned calls", responseTime: "Avg response time", recentActivity: "RECENT ACTIVITY", latestUpdates: "Latest updates", viewAll: "View all →", quickActions: "QUICK ACTIONS", quickQuestion: "What would you like to do?", createWorkOrder: "Create work order", startService: "Start a new service request", addUnit: "Add a unit", registerAsset: "Register a vehicle or asset", serviceOperations: "SERVICE OPERATIONS", workOrderQueue: "Work order queue", newWorkOrder: "+ New work order", export: "Export ↓", assetDatabase: "ASSET DATABASE", fleetDirectory: "Fleet directory", addNewUnit: "+ Add unit", filters: "Filters ≡", assignedClient: "ASSIGNED CLIENT", lastService: "LAST SERVICE", lastUsage: "LAST SERVICE USAGE", pmNeeded: "PM needed", pmClear: "PM clear", workOrder: "Work order", unitClient: "Unit / client", technician: "Technician", priority: "Priority", status: "Status", updated: "Updated", fleetUnit: "Fleet unit", selectUnit: "Select a unit from the repertory", addNewUnitOption: "+ Add New Unit to Repertory", serviceRequest: "Service request", lastServiceUsage: "Last service mileage / hours", unitNumber: "Unit number", vin: "VIN", clientName: "Client name", lastServiceDate: "Last service", unitType: "Unit type", saveUnit: "Save unit", cancel: "Cancel", deleteUnit: "Delete unit", close: "Close modal", workOrderDetails: "WORK ORDER", notes: "Technician notes", addNotePlaceholder: "Add a timestamped note...", addNote: "Add note", parts: "Labor & parts", description: "Description", amount: "Amount", add: "Add", delete: "Delete", deleteWorkOrder: "Delete work order", done: "Done", createTitle: "Create work order", addUnitTitle: "Add fleet unit", editUnitTitle: "Edit fleet unit", addToRepertory: "Add unit to repertory", part: "Part", labor: "Labor", loginTitle: "RPM Diesel Dashboard", loginSubtitle: "Sign in to manage fleet operations", name: "Name", password: "Password", signIn: "Sign in", invalidLogin: "Enter a valid name and password.", signedInAs: "Signed in as", signOut: "Sign out", language: "Switch language",
-    return fallback;
-    //
-      previousPeriod: "Période précédente", nextPeriod: "Période suivante", chooseDate: "Choisir une date", currentPeriod: "Période actuelle", day: "Jour",
-    return stored ? (JSON.parse(stored) as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-`;
-
 function loadStored<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
   try {
@@ -238,9 +220,11 @@ function createId() {
 
 function StatusPill({ status, language }: { status: JobStatus; language: Language }) {
   const styles = {
+    "Scheduled": "status-teal",
     "In Progress": "status-blue",
     "Waiting on Parts": "status-amber",
     "Waiting on Estimates": "status-purple",
+    "Ready for Invoicing": "status-indigo",
     Completed: "status-green",
   };
   return (
@@ -288,13 +272,29 @@ function PunchClock({ activeEntry, jobs, language, onClockIn, onClockOut }: { ac
   }, [activeEntry]);
   const elapsed = activeEntry ? Math.max(0, now - new Date(activeEntry.clockIn).getTime()) : 0;
   const elapsedLabel = `${String(Math.floor(elapsed / 3600000)).padStart(2, "0")}:${String(Math.floor((elapsed % 3600000) / 60000)).padStart(2, "0")}:${String(Math.floor((elapsed % 60000) / 1000)).padStart(2, "0")}`;
-  return <div className={`punch-clock ${activeEntry ? "punch-active" : ""}`}><span className="punch-indicator" /><div className="punch-copy"><strong>{activeEntry ? (language === "en" ? "On the clock" : "Pointé") : (language === "en" ? "Off the clock" : "Non pointé")}</strong><small>{activeEntry ? elapsedLabel : (language === "en" ? "Select a work order first" : "Sélectionnez d'abord un ordre")}</small></div>{!activeEntry ? <><CustomSelect className="w-auto" value={workOrderId} onChange={setWorkOrderId} ariaLabel={language === "en" ? "Assign work order" : "Assigner un ordre de travail"} placeholder={language === "en" ? "Select work order" : "Sélectionner un ordre"} options={jobs.filter((job) => job.status !== "Completed").map((job) => ({ value: job.id, label: `${job.unit} · ${job.issue}` }))} /><button disabled={!workOrderId} className="punch-button punch-in" onClick={() => onClockIn(workOrderId)}>{language === "en" ? "Clock In" : "Pointer"}</button></> : <button className="punch-button punch-out" onClick={onClockOut}>{language === "en" ? "Clock Out" : "Dépointer"}</button>}</div>;
+  return <div className={`punch-clock ${activeEntry ? "punch-active" : ""}`}><span className="punch-indicator" /><div className="punch-copy"><strong>{activeEntry ? (language === "en" ? "On the clock" : "Pointé") : (language === "en" ? "Off the clock" : "Non pointé")}</strong><small>{activeEntry ? elapsedLabel : (language === "en" ? "Select a work order first" : "Sélectionnez d'abord un ordre")}</small></div>{!activeEntry ? <><CustomSelect className="w-auto" value={workOrderId} onChange={setWorkOrderId} ariaLabel={language === "en" ? "Assign work order" : "Assigner un ordre de travail"} placeholder={language === "en" ? "Select work order" : "Sélectionner un ordre"} options={jobs.filter((job) => job.status !== "Completed").map((job) => ({ value: job.id, label: `${job.unit} · ${job.client} · ${job.issue}` }))} /><button disabled={!workOrderId} className="punch-button punch-in" onClick={() => onClockIn(workOrderId)}>{language === "en" ? "Clock In" : "Pointer"}</button></> : <button className="punch-button punch-out" onClick={onClockOut}>{language === "en" ? "Clock Out" : "Dépointer"}</button>}</div>;
 }
 
 type SelectOption = { value: string; label: string };
 // Unit numbers are only unique per client, so identity/lookup keys must combine both fields.
 function unitKey(unit: { unit: string; client: string }): string {
   return JSON.stringify([unit.unit, unit.client]);
+}
+// <input type="datetime-local"> reads/writes local wall-clock time with no timezone info, but stored
+// timestamps are UTC ISO strings; slicing the ISO string directly (as if it were already local) shows
+// the wrong time by the viewer's UTC offset. Shift by that offset before formatting for the input.
+function toDatetimeLocalValue(iso: string | null): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+// The reverse of toDatetimeLocalValue: the browser already gives us a local wall-clock string with no
+// timezone, so the Date constructor correctly interprets it as local time before converting to UTC ISO.
+function fromDatetimeLocalValue(value: string): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 // Native <select> triggers an OS-level picker on iOS/Android; a stray dismissal event from that overlay can bubble up and close parent modals. This component never renders a real <select>.
 function CustomSelect({ value, onChange, options, ariaLabel, placeholder, className, disabled, id, onSelect }: { value: string | undefined; onChange: (value: string) => void; options: SelectOption[]; ariaLabel?: string; placeholder?: string; className?: string; disabled?: boolean; id?: string; onSelect?: () => void }) {
@@ -562,6 +562,12 @@ export default function Home() {
     adminPendingParts: language === "en" ? "Check the reception of pending parts." : "Vérifiez la réception des pièces en attente.",
     reviewEstimates: language === "en" ? "Review estimates →" : "Vérifier les estimations →",
     reviewParts: language === "en" ? "Review parts →" : "Vérifier les pièces →",
+    "Scheduled": language === "en" ? "Scheduled" : "Planifié",
+    "Ready for Invoicing": language === "en" ? "Ready for Invoicing" : "Prêt pour facturation",
+    adminReadyForInvoicing: language === "en" ? "Work orders are ready for invoicing." : "Des ordres de travail sont prêts pour facturation.",
+    reviewInvoicing: language === "en" ? "Review invoicing →" : "Vérifier la facturation →",
+    scheduledJobsNotice: language === "en" ? "Scheduled work orders need to be completed." : "Des ordres de travail planifiés doivent être complétés.",
+    reviewScheduled: language === "en" ? "Review scheduled →" : "Vérifier les planifiés →",
     onTheClock: language === "en" ? "On the clock" : "Pointé",
     offTheClock: language === "en" ? "Off the clock" : "Non pointé",
     selectWorkOrderFirst: language === "en" ? "Select a work order first" : "Sélectionnez d'abord un ordre",
@@ -648,7 +654,11 @@ export default function Home() {
     if (!activeUser || activeTimeEntry || !workOrderId) return;
     try {
       const created = await createTimeEntry({ userId: activeUser, userName: activeUser, workOrderId, clockIn: new Date().toISOString() });
-      if (created) setTimeEntries((current) => [created, ...current]);
+      if (created) {
+        setTimeEntries((current) => [created, ...current]);
+        const job = jobData.find((item) => item.id === workOrderId);
+        if (job && job.status !== "In Progress") setStatus(job.id, "In Progress");
+      }
       else setCloudError(t("cloudTimeMissing"));
     } catch (error) {
       queueOfflineMutation({ kind: "clock-in", entry: { userId: activeUser, userName: activeUser, workOrderId, clockIn: new Date().toISOString() } });
@@ -671,7 +681,11 @@ export default function Home() {
     if (!isAdmin || !adminPunchUser || !adminPunchJob || timeEntries.some((entry) => entry.userId === adminPunchUser && entry.status === "active")) return;
     try {
       const created = await createTimeEntry({ userId: adminPunchUser, userName: adminPunchUser, workOrderId: adminPunchJob, clockIn: new Date().toISOString() });
-      if (created) setTimeEntries((current) => [created, ...current]);
+      if (created) {
+        setTimeEntries((current) => [created, ...current]);
+        const job = jobData.find((item) => item.id === adminPunchJob);
+        if (job && job.status !== "In Progress") setStatus(job.id, "In Progress");
+      }
     } catch (error) {
       queueOfflineMutation({ kind: "clock-in", entry: { userId: adminPunchUser, userName: adminPunchUser, workOrderId: adminPunchJob, clockIn: new Date().toISOString() } });
       reportActionError(`Technician clock in failed; punch queued for retry: ${(error as Error).message}`);
@@ -1716,6 +1730,16 @@ export default function Home() {
                 <div><b>{jobData.filter((job) => job.status === "Waiting on Parts").length} {t("adminPendingParts")}</b></div>
                 <button onClick={() => { setJobFilter("Waiting on Parts"); setSection("jobs"); }}>{t("reviewParts")}</button>
               </div>}
+              {isAdmin && jobData.filter((job) => job.status === "Ready for Invoicing").length > 0 && <div className="alert-banner alert-danger">
+                <span className="alert-icon">!</span>
+                <div><b>{jobData.filter((job) => job.status === "Ready for Invoicing").length} {t("adminReadyForInvoicing")}</b></div>
+                <button onClick={() => { setJobFilter("Ready for Invoicing"); setSection("jobs"); }}>{t("reviewInvoicing")}</button>
+              </div>}
+              {jobData.filter((job) => job.status === "Scheduled").length > 0 && <div className="alert-banner">
+                <span className="alert-icon">!</span>
+                <div><b>{jobData.filter((job) => job.status === "Scheduled").length} {t("scheduledJobsNotice")}</b></div>
+                <button onClick={() => { setJobFilter("Scheduled"); setSection("jobs"); }}>{t("reviewScheduled")}</button>
+              </div>}
               {unitData.filter((unit) => pmDueForUnit(unit)).length > 0 && <div className="alert-banner">
                 <span className="alert-icon">!</span>
                 <div>
@@ -1879,11 +1903,11 @@ export default function Home() {
               <div className="toolbar"><div><p className="card-kicker">{t("punchClock")}</p><h2>{t("punchClock")}</h2></div></div>
               <p className="punch-page-copy">{t("punchSubtitle")}</p>
               <PunchClock activeEntry={activeTimeEntry} jobs={jobData} language={language} onClockIn={clockIn} onClockOut={clockOut} />
-              {canManageWorkOrders && <><div className="manual-time-card"><div className="detail-section-heading"><h3>{t("addTechnicianTime")}</h3></div><div className="manual-time-form"><CustomSelect value={manualTimeUser} onChange={setManualTimeUser} ariaLabel={t("technician")} placeholder={t("technician")} options={userAccounts.filter((account) => account.active && account.isTechnician).map((account) => ({ value: account.name, label: account.name }))} /><CustomSelect value={manualTimeJob} onChange={setManualTimeJob} ariaLabel={t("workOrder")} placeholder={t("noData")} options={jobData.filter((job) => job.status !== "Completed").map((job) => ({ value: job.id, label: `${job.unit} · ${job.issue}` }))} /><input type="number" min="0.01" step="0.01" value={manualTimeHours} onChange={(event) => setManualTimeHours(event.target.value)} placeholder={t("hoursDecimal")} aria-label={t("hoursDecimal")} /><button className="primary-button" onClick={addManualTime}>{t("add")}</button></div></div><div className="manual-time-card"><div className="detail-section-heading"><h3>{t("manageLivePunches")}</h3></div><div className="manual-time-form"><CustomSelect value={adminPunchUser} onChange={setAdminPunchUser} ariaLabel={t("technician")} placeholder={t("technician")} options={userAccounts.filter((account) => account.active && account.isTechnician).map((account) => ({ value: account.name, label: account.name }))} /><CustomSelect value={adminPunchJob} onChange={setAdminPunchJob} ariaLabel={t("workOrder")} placeholder={t("noData")} options={jobData.filter((job) => job.status !== "Completed").map((job) => ({ value: job.id, label: `${job.unit} · ${job.issue}` }))} /><button className="primary-button" disabled={!adminPunchUser || !adminPunchJob} onClick={adminClockIn}>{t("clockInTechnician")}</button></div><div className="admin-active-punches">{timeEntries.filter((entry) => entry.status === "active" && entry.userId !== activeUser).map((entry) => <div className="admin-active-punch" key={entry.id}><span><strong>{entry.userName}</strong><small>{jobData.find((job) => job.id === entry.workOrderId)?.unit ?? t("noData")}</small></span><button className="punch-button punch-out" onClick={() => adminClockOut(entry)}>{t("clockOut")}</button></div>)}</div></div></>}
+              {canManageWorkOrders && <><div className="manual-time-card"><div className="detail-section-heading"><h3>{t("addTechnicianTime")}</h3></div><div className="manual-time-form"><CustomSelect value={manualTimeUser} onChange={setManualTimeUser} ariaLabel={t("technician")} placeholder={t("technician")} options={userAccounts.filter((account) => account.active && account.isTechnician).map((account) => ({ value: account.name, label: account.name }))} /><CustomSelect value={manualTimeJob} onChange={setManualTimeJob} ariaLabel={t("workOrder")} placeholder={t("noData")} options={jobData.filter((job) => job.status !== "Completed").map((job) => ({ value: job.id, label: `${job.unit} · ${job.client} · ${job.issue}` }))} /><input type="number" min="0.01" step="0.01" value={manualTimeHours} onChange={(event) => setManualTimeHours(event.target.value)} placeholder={t("hoursDecimal")} aria-label={t("hoursDecimal")} /><button className="primary-button" onClick={addManualTime}>{t("add")}</button></div></div><div className="manual-time-card"><div className="detail-section-heading"><h3>{t("manageLivePunches")}</h3></div><div className="manual-time-form"><CustomSelect value={adminPunchUser} onChange={setAdminPunchUser} ariaLabel={t("technician")} placeholder={t("technician")} options={userAccounts.filter((account) => account.active && account.isTechnician).map((account) => ({ value: account.name, label: account.name }))} /><CustomSelect value={adminPunchJob} onChange={setAdminPunchJob} ariaLabel={t("workOrder")} placeholder={t("noData")} options={jobData.filter((job) => job.status !== "Completed").map((job) => ({ value: job.id, label: `${job.unit} · ${job.client} · ${job.issue}` }))} /><button className="primary-button" disabled={!adminPunchUser || !adminPunchJob} onClick={adminClockIn}>{t("clockInTechnician")}</button></div><div className="admin-active-punches">{timeEntries.filter((entry) => entry.status === "active" && entry.userId !== activeUser).map((entry) => <div className="admin-active-punch" key={entry.id}><span><strong>{entry.userName}</strong><small>{jobData.find((job) => job.id === entry.workOrderId)?.unit ?? t("noData")}</small></span><button className="punch-button punch-out" onClick={() => adminClockOut(entry)}>{t("clockOut")}</button></div>)}</div></div></>}
               <div className="punch-history-section">
                 <div className="detail-section-heading punch-history-heading"><div><h3>{t("punchHistory")}</h3><span>{periodTimeEntries.length} {t("entries")} · {periodStart.toLocaleDateString(language === "fr" ? "fr-CA" : "en-CA")} - {new Date(periodEnd.getTime() - 86400000).toLocaleDateString(language === "fr" ? "fr-CA" : "en-CA")}</span></div><div className="punch-history-controls-row"><div className="punch-history-admin-controls">{isAdmin && <><button type="button" className="outline-button" onClick={() => { setAdminSeeAllPunches((current) => !current); setAdminPunchFilter("all"); }}>{adminSeeAllPunches ? t("seeMyPunches") : t("seeAllPunches")}</button>{adminSeeAllPunches && <CustomSelect value={adminPunchFilter} onChange={setAdminPunchFilter} ariaLabel={t("filterTechnician")} options={[{ value: "all", label: t("filterTechnician") }, ...userAccounts.filter((account) => account.active && account.isTechnician).map((account) => ({ value: account.name, label: account.name }))]} />}</>}</div><div className="punch-period-controls"><button type="button" className="period-nav-button" onClick={() => { const next = new Date(`${punchAnchorDate}T12:00:00`); if (punchPeriod === "week") next.setDate(next.getDate() - 7); else next.setMonth(next.getMonth() - 1); setPunchAnchorDate(next.toISOString().slice(0, 10)); }} aria-label={t("previousPeriod")}>‹</button><input className="punch-date-picker" type="date" value={punchAnchorDate} onChange={(event) => setPunchAnchorDate(event.target.value)} aria-label={t("chooseDate")} /><button type="button" className="period-nav-button" onClick={() => { const next = new Date(`${punchAnchorDate}T12:00:00`); if (punchPeriod === "week") next.setDate(next.getDate() + 7); else next.setMonth(next.getMonth() + 1); setPunchAnchorDate(next.toISOString().slice(0, 10)); }} aria-label={t("nextPeriod")}>›</button><CustomSelect className="punch-period-select" value={punchPeriod} onChange={(value) => setPunchPeriod(value as "day" | "week" | "month")} ariaLabel={t("punchHistory")} options={[{ value: "day", label: t("day") }, { value: "week", label: t("week") }, { value: "month", label: t("month") }]} /><button type="button" className="period-today-button" onClick={() => setPunchAnchorDate(new Date().toISOString().slice(0, 10))}>{t("currentPeriod")}</button></div></div></div>
                 <div className="punch-day-groups">{punchGroups.map((group) => <div className={`punch-day-group ${group.dayKey === punchDayKey(new Date().toISOString()) ? "punch-day-current" : ""}`} key={group.dayKey}><strong>{group.dayKey === punchDayKey(new Date().toISOString()) ? `${t("today")} · ` : ""}{new Date(`${group.dayKey}T00:00:00`).toLocaleDateString(language === "fr" ? "fr-CA" : "en-CA", { weekday: "long", month: "long", day: "numeric" })}</strong><span>{group.entries.length} {t("entries")}</span></div>)}</div>
-                <div className="table-wrap"><table className="punch-history-table"><thead><tr><th>{t("punchedBy")}</th><th>{t("workOrder")}</th><th>{t("clockIn")}</th><th>{t("clockOut")}</th><th>{t("totalHours")}</th><th>{t("status")}</th>{canManageWorkOrders && <th />}</tr></thead><tbody>{visibleTimeEntries.length ? visibleTimeEntries.map((entry) => editingTimeEntryId === entry.id && editingTimeEntry ? <tr key={entry.id} className="time-entry-edit-row"><td><CustomSelect value={editingTimeEntry.userName} onChange={(value) => setEditingTimeEntry({ ...editingTimeEntry, userId: value, userName: value })} options={userAccounts.filter((account) => account.active && account.isTechnician).map((account) => ({ value: account.name, label: account.name }))} /></td><td><CustomSelect value={editingTimeEntry.workOrderId ?? ""} onChange={(value) => setEditingTimeEntry({ ...editingTimeEntry, workOrderId: value || null })} placeholder={t("noData")} options={jobData.map((job) => ({ value: job.id, label: `${job.unit} · ${job.issue}` }))} /></td><td><input type="datetime-local" value={editingTimeEntry.clockIn.slice(0, 16)} onChange={(event) => setEditingTimeEntry({ ...editingTimeEntry, clockIn: new Date(event.target.value).toISOString() })} /></td><td><input type="datetime-local" value={editingTimeEntry.clockOut ? editingTimeEntry.clockOut.slice(0, 16) : ""} onChange={(event) => setEditingTimeEntry({ ...editingTimeEntry, clockOut: event.target.value ? new Date(event.target.value).toISOString() : null, status: event.target.value ? "completed" : "active" })} /></td><td><input type="number" min="0" step="0.01" value={editingTimeEntry.totalHours ?? ""} onChange={(event) => setEditingTimeEntry({ ...editingTimeEntry, totalHours: event.target.value ? Number(event.target.value) : null })} /></td><td><span className={`time-status ${editingTimeEntry.status === "active" ? "time-active" : "time-completed"}`}>{editingTimeEntry.status === "active" ? t("activePunch") : t("Completed")}</span></td><td><div className="time-entry-actions"><button className="primary-button" onClick={saveTimeEntryEdit}>{t("save")}</button><button className="entry-delete" onClick={() => deleteTimeEntry(entry.id)}>{t("delete")}</button></div></td></tr> : <tr key={entry.id}><td><strong>{entry.userName}</strong></td><td>{entry.workOrderId ? (jobData.find((job) => job.id === entry.workOrderId)?.unit ?? entry.workOrderId) : t("noData")}</td><td>{new Date(entry.clockIn).toLocaleString()}</td><td>{entry.clockOut ? new Date(entry.clockOut).toLocaleString() : t("activePunch")}</td><td>{entry.totalHours == null ? t("activePunch") : `${entry.totalHours.toFixed(2)} h`}</td><td><span className={`time-status ${entry.status === "active" ? "time-active" : "time-completed"}`}>{entry.status === "active" ? t("activePunch") : t("Completed")}</span></td>{canManageWorkOrders && <td><div className="time-entry-actions"><button className="outline-button" onClick={() => startTimeEntryEdit(entry)}>{t("edit")}</button><button className="entry-delete" onClick={() => deleteTimeEntry(entry.id)}>{t("delete")}</button></div></td>}</tr>) : <tr><td colSpan={canManageWorkOrders ? 7 : 6} className="empty-history">{t("noPunches")}</td></tr>}</tbody></table></div>
+                <div className="table-wrap"><table className="punch-history-table"><thead><tr><th>{t("punchedBy")}</th><th>{t("workOrder")}</th><th>{t("clockIn")}</th><th>{t("clockOut")}</th><th>{t("totalHours")}</th><th>{t("status")}</th>{canManageWorkOrders && <th />}</tr></thead><tbody>{visibleTimeEntries.length ? visibleTimeEntries.map((entry) => editingTimeEntryId === entry.id && editingTimeEntry ? <tr key={entry.id} className="time-entry-edit-row"><td><CustomSelect value={editingTimeEntry.userName} onChange={(value) => setEditingTimeEntry({ ...editingTimeEntry, userId: value, userName: value })} options={userAccounts.filter((account) => account.active && account.isTechnician).map((account) => ({ value: account.name, label: account.name }))} /></td><td><CustomSelect value={editingTimeEntry.workOrderId ?? ""} onChange={(value) => setEditingTimeEntry({ ...editingTimeEntry, workOrderId: value || null })} placeholder={t("noData")} options={jobData.map((job) => ({ value: job.id, label: `${job.unit} · ${job.client} · ${job.issue}` }))} /></td><td><input type="datetime-local" value={toDatetimeLocalValue(editingTimeEntry.clockIn)} onChange={(event) => { const clockIn = fromDatetimeLocalValue(event.target.value) ?? editingTimeEntry.clockIn; const totalHours = editingTimeEntry.clockOut ? Number(((new Date(editingTimeEntry.clockOut).getTime() - new Date(clockIn).getTime()) / 3600000).toFixed(2)) : editingTimeEntry.totalHours; setEditingTimeEntry({ ...editingTimeEntry, clockIn, totalHours }); }} /></td><td><input type="datetime-local" value={toDatetimeLocalValue(editingTimeEntry.clockOut)} onChange={(event) => { const clockOut = fromDatetimeLocalValue(event.target.value); const totalHours = clockOut ? Number(((new Date(clockOut).getTime() - new Date(editingTimeEntry.clockIn).getTime()) / 3600000).toFixed(2)) : editingTimeEntry.totalHours; setEditingTimeEntry({ ...editingTimeEntry, clockOut, status: clockOut ? "completed" : "active", totalHours }); }} /></td><td><input type="number" min="0" step="0.01" value={editingTimeEntry.totalHours ?? ""} onChange={(event) => setEditingTimeEntry({ ...editingTimeEntry, totalHours: event.target.value ? Number(event.target.value) : null })} /></td><td><span className={`time-status ${editingTimeEntry.status === "active" ? "time-active" : "time-completed"}`}>{editingTimeEntry.status === "active" ? t("activePunch") : t("Completed")}</span></td><td><div className="time-entry-actions"><button className="primary-button" onClick={saveTimeEntryEdit}>{t("save")}</button><button className="entry-delete" onClick={() => deleteTimeEntry(entry.id)}>{t("delete")}</button></div></td></tr> : <tr key={entry.id}><td><strong>{entry.userName}</strong></td><td>{entry.workOrderId ? (() => { const linkedJob = jobData.find((job) => job.id === entry.workOrderId); return linkedJob ? `${linkedJob.unit} · ${linkedJob.client} · ${linkedJob.issue}` : entry.workOrderId; })() : t("noData")}</td><td>{new Date(entry.clockIn).toLocaleString()}</td><td>{entry.clockOut ? new Date(entry.clockOut).toLocaleString() : t("activePunch")}</td><td>{entry.totalHours == null ? t("activePunch") : `${entry.totalHours.toFixed(2)} h`}</td><td><span className={`time-status ${entry.status === "active" ? "time-active" : "time-completed"}`}>{entry.status === "active" ? t("activePunch") : t("Completed")}</span></td>{canManageWorkOrders && <td><div className="time-entry-actions"><button className="outline-button" onClick={() => startTimeEntryEdit(entry)}>{t("edit")}</button><button className="entry-delete" onClick={() => deleteTimeEntry(entry.id)}>{t("delete")}</button></div></td>}</tr>) : <tr><td colSpan={canManageWorkOrders ? 7 : 6} className="empty-history">{t("noPunches")}</td></tr>}</tbody></table></div>
               </div>
             </section>
           )}
@@ -1956,9 +1980,11 @@ export default function Home() {
                   {(
                     [
                       "All",
+                      "Scheduled",
                       "In Progress",
                       "Waiting on Parts",
                       "Waiting on Estimates",
+                      "Ready for Invoicing",
                       "Completed",
                     ] as const
                   ).map((filter) => (
@@ -2030,7 +2056,7 @@ export default function Home() {
                             value={job.status}
                             onChange={(value) => setStatus(job.id, value as JobStatus)}
                             ariaLabel={`${t("status")} ${job.unit}`}
-                            options={(["In Progress", "Waiting on Parts", "Waiting on Estimates", "Completed"] as JobStatus[]).map((status) => ({ value: status, label: t(status) }))}
+                            options={(["Scheduled", "In Progress", "Waiting on Parts", "Waiting on Estimates", "Ready for Invoicing", "Completed"] as JobStatus[]).map((status) => ({ value: status, label: t(status) }))}
                           />
                         </td>
                         <td className="updated-cell">{job.updated}</td>
@@ -2244,9 +2270,11 @@ export default function Home() {
                       onChange={(value) => updateJob("status", value)}
                       options={(
                         [
+                          "Scheduled",
                           "In Progress",
                           "Waiting on Parts",
                           "Waiting on Estimates",
+                          "Ready for Invoicing",
                           "Completed",
                         ] as JobStatus[]
                       ).map((status) => ({ value: status, label: t(status) }))}

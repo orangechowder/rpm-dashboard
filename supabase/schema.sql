@@ -22,7 +22,7 @@ create table if not exists public.work_orders (
   client text not null,
   tech text not null default 'Unassigned',
   priority text not null default 'Normal' check (priority in ('High', 'Normal', 'Low')),
-  status text not null default 'In Progress' check (status in ('In Progress', 'Waiting on Parts', 'Waiting on Estimates', 'Completed')),
+  status text not null default 'In Progress' check (status in ('Scheduled', 'In Progress', 'Waiting on Parts', 'Waiting on Estimates', 'Ready for Invoicing', 'Completed')),
   issue text not null,
   updated text not null default 'Just now',
   usage text not null,
@@ -116,6 +116,25 @@ $$;
 -- Work orders keep a plain (unmanaged) unit/client snapshot; referential integrity against fleet_units
 -- is enforced in the application layer (see deleteUnit's linked-work-order check in app/page.tsx),
 -- since a composite FK would otherwise cascade-rewrite historical job.client snapshots on unit edits.
+
+-- Widen the status check constraint to add "Scheduled" and "Ready for Invoicing" for existing installs.
+do $$
+declare
+  status_check text;
+begin
+  select conname into status_check
+    from pg_constraint
+    where conrelid = 'public.work_orders'::regclass
+      and contype = 'c'
+      and pg_get_constraintdef(oid) like '%status%';
+  if status_check is not null then
+    execute format('alter table public.work_orders drop constraint %I', status_check);
+  end if;
+  alter table public.work_orders
+    add constraint work_orders_status_check
+    check (status in ('Scheduled', 'In Progress', 'Waiting on Parts', 'Waiting on Estimates', 'Ready for Invoicing', 'Completed'));
+end;
+$$;
 
 create or replace function public.touch_updated_at()
 returns trigger language plpgsql as $$
