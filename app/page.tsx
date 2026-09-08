@@ -399,6 +399,11 @@ export default function Home() {
   const [passwordTargetId, setPasswordTargetId] = useState<string | null>(null);
   const [managedPassword, setManagedPassword] = useState("12345678");
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  // Dismissed dashboard alerts: cleared on every fresh login, so they reappear next time someone signs in.
+  const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
+  // Long-punch (>7h) dismissals persist across logins, keyed by entry id, so only a genuinely new
+  // over-7h punch (not previously dismissed) brings the banner back.
+  const [dismissedLongPunchIds, setDismissedLongPunchIds] = useState<string[]>(() => loadStored("rpm-diesel-dismissed-long-punches", []));
   const [passwordEditorOpen, setPasswordEditorOpen] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
   const [nextPassword, setNextPassword] = useState("");
@@ -568,6 +573,7 @@ export default function Home() {
     reviewInvoicing: language === "en" ? "Review invoicing →" : "Vérifier la facturation →",
     scheduledJobsNotice: language === "en" ? "Scheduled work orders need to be completed." : "Des ordres de travail planifiés doivent être complétés.",
     reviewScheduled: language === "en" ? "Review scheduled →" : "Vérifier les planifiés →",
+    dismiss: language === "en" ? "Dismiss" : "Ignorer",
     onTheClock: language === "en" ? "On the clock" : "Pointé",
     offTheClock: language === "en" ? "Off the clock" : "Non pointé",
     selectWorkOrderFirst: language === "en" ? "Select a work order first" : "Sélectionnez d'abord un ordre",
@@ -635,6 +641,7 @@ export default function Home() {
       setLoginError(false);
       setProfileMenuOpen(false);
       setPasswordEditorOpen(false);
+      setDismissedAlerts(new Set());
       window.localStorage.setItem("rpm-diesel-session", JSON.stringify(account));
     } else {
       setLoginError(true);
@@ -651,7 +658,11 @@ export default function Home() {
   };
   const activeTimeEntry = timeEntries.find((entry) => entry.userId === activeUser && entry.status === "active");
   const clockIn = async (workOrderId: string | null) => {
-    if (!activeUser || activeTimeEntry || !workOrderId) return;
+    if (!activeUser || !workOrderId) return;
+    if (activeTimeEntry) {
+      reportActionError(language === "en" ? "You're already punched in on another work order. Clock out first." : "Vous êtes déjà pointé sur un autre ordre de travail. Dépointez d'abord.");
+      return;
+    }
     try {
       const created = await createTimeEntry({ userId: activeUser, userName: activeUser, workOrderId, clockIn: new Date().toISOString() });
       if (created) {
@@ -678,7 +689,11 @@ export default function Home() {
     }
   };
   const adminClockIn = async () => {
-    if (!isAdmin || !adminPunchUser || !adminPunchJob || timeEntries.some((entry) => entry.userId === adminPunchUser && entry.status === "active")) return;
+    if (!isAdmin || !adminPunchUser || !adminPunchJob) return;
+    if (timeEntries.some((entry) => entry.userId === adminPunchUser && entry.status === "active")) {
+      reportActionError(language === "en" ? `${adminPunchUser} is already punched in on another work order.` : `${adminPunchUser} est déjà pointé sur un autre ordre de travail.`);
+      return;
+    }
     try {
       const created = await createTimeEntry({ userId: adminPunchUser, userName: adminPunchUser, workOrderId: adminPunchJob, clockIn: new Date().toISOString() });
       if (created) {
@@ -848,6 +863,9 @@ export default function Home() {
   useEffect(() => {
     window.localStorage.setItem("rpm-diesel-job-meter-overrides", JSON.stringify(jobMeterOverrides));
   }, [jobMeterOverrides]);
+  useEffect(() => {
+    window.localStorage.setItem("rpm-diesel-dismissed-long-punches", JSON.stringify(dismissedLongPunchIds));
+  }, [dismissedLongPunchIds]);
   useEffect(() => {
     const flushOfflineMutations = async () => {
       const pending = readOfflineMutations<OfflinePayload>(window.localStorage, offlineMutationKey);
@@ -1048,9 +1066,14 @@ export default function Home() {
     window.addEventListener("storage", handleStorage);
     return () => window.removeEventListener("storage", handleStorage);
   }, [language]);
-  const filteredJobs = jobFilter === "All"
+  // Most recent punch (clock-out if closed, otherwise clock-in) recorded against a work order; 0 if none.
+  const latestPunchTimeFor = (jobId: string) => timeEntries.filter((entry) => entry.workOrderId === jobId).reduce((latest, entry) => Math.max(latest, new Date(entry.clockOut ?? entry.clockIn).getTime()), 0);
+  const filteredJobs = (jobFilter === "All"
     ? jobData.filter((job) => job.status.trim() !== "Completed")
-    : jobData.filter((job) => job.status.trim() === jobFilter);
+    : jobData.filter((job) => job.status.trim() === jobFilter)
+  ).slice().sort((a, b) => isAdmin
+    ? latestPunchTimeFor(b.id) - latestPunchTimeFor(a.id)
+    : (activeTimeEntry?.workOrderId === b.id ? 1 : 0) - (activeTimeEntry?.workOrderId === a.id ? 1 : 0));
   const openJobsQueue = () => {
     setJobFilter("All");
     setSection("jobs");
@@ -1104,7 +1127,7 @@ export default function Home() {
   const activeJob = detailJobId
     ? jobData.find((job) => job.id === detailJobId)
     : undefined;
-  const workedHoursFor = (workOrderId: string) => timeEntries.filter((entry) => entry.workOrderId === workOrderId && entry.totalHours != null).reduce((total, entry) => total + (entry.totalHours ?? 0), 0).toFixed(2);
+  const workedHoursFor = (workOrderId: string) => timeEntries.filter((entry) => entry.workOrderId === workOrderId).reduce((total, entry) => total + (entry.totalHours ?? Math.max(0, (Date.now() - new Date(entry.clockIn).getTime()) / 3600000)), 0).toFixed(2);
   const punchDayKey = (iso: string) => {
     const date = new Date(iso);
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -1136,6 +1159,10 @@ export default function Home() {
     entries: periodTimeEntries.filter((entry) => punchDayKey(entry.clockIn) === dayKey),
   }));
   const longPunchEntries = timeEntries.filter((entry) => entry.userId === activeUser && entry.workOrderId && entry.totalHours != null && entry.totalHours >= 7);
+  const visibleLongPunchEntries = longPunchEntries.filter((entry) => !dismissedLongPunchIds.includes(entry.id));
+  const dismissLongPunchAlert = () => setDismissedLongPunchIds((current) => Array.from(new Set([...current, ...longPunchEntries.map((entry) => entry.id)])));
+  const isAlertDismissed = (key: string) => dismissedAlerts.has(key);
+  const dismissAlert = (key: string) => setDismissedAlerts((current) => new Set(current).add(key));
   const syncUnitFromJob = (
     job: Job,
     status: JobStatus = job.status,
@@ -1701,7 +1728,7 @@ export default function Home() {
             <>
               {(() => {
                 const openTechnicianJobs = jobData.filter((job) => job.tech === activeUser && job.status === "In Progress").length;
-                return openTechnicianJobs > 0 ? (
+                return openTechnicianJobs > 0 && !isAlertDismissed("workload") ? (
                   <div className="alert-banner alert-danger">
                     <span className="alert-icon">!</span>
                     <div>
@@ -1709,44 +1736,51 @@ export default function Home() {
                       <span>{workloadAlert.continue}</span>
                     </div>
                     <button onClick={openJobsQueue}>{workloadAlert.view}</button>
+                    <button className="alert-dismiss" aria-label={t("dismiss")} onClick={() => dismissAlert("workload")}>×</button>
                   </div>
                 ) : null;
               })()}
-              {longPunchEntries.length > 0 && <div className="alert-banner alert-warning">
+              {visibleLongPunchEntries.length > 0 && <div className="alert-banner alert-warning">
                 <span className="alert-icon">!</span>
                 <div>
-                  <b>{language === "en" ? `${longPunchEntries.length} punch${longPunchEntries.length === 1 ? "" : "es"} exceeds 7.00 hours.` : `${longPunchEntries.length} poinçon${longPunchEntries.length === 1 ? "" : "s"} dépasse 7,00 heures.`}</b>
+                  <b>{language === "en" ? `${visibleLongPunchEntries.length} punch${visibleLongPunchEntries.length === 1 ? "" : "es"} exceeds 7.00 hours.` : `${visibleLongPunchEntries.length} poinçon${visibleLongPunchEntries.length === 1 ? "" : "s"} dépasse 7,00 heures.`}</b>
                   <span>{language === "en" ? "Please verify the clock-out time and work order." : "Veuillez vérifier l'heure de dépointage et l'ordre de travail."}</span>
                 </div>
                 <button onClick={() => setSection("punch")}>{language === "en" ? "Review punches →" : "Vérifier les poinçons →"}</button>
+                <button className="alert-dismiss" aria-label={t("dismiss")} onClick={dismissLongPunchAlert}>×</button>
               </div>}
-              {isAdmin && jobData.filter((job) => job.status === "Waiting on Estimates").length > 0 && <div className="alert-banner alert-danger">
+              {isAdmin && !isAlertDismissed("estimates") && jobData.filter((job) => job.status === "Waiting on Estimates").length > 0 && <div className="alert-banner alert-danger">
                 <span className="alert-icon">!</span>
                 <div><b>{jobData.filter((job) => job.status === "Waiting on Estimates").length} {t("adminPendingEstimates")}</b></div>
                 <button onClick={() => { setJobFilter("Waiting on Estimates"); setSection("jobs"); }}>{t("reviewEstimates")}</button>
+                <button className="alert-dismiss" aria-label={t("dismiss")} onClick={() => dismissAlert("estimates")}>×</button>
               </div>}
-              {isAdmin && jobData.filter((job) => job.status === "Waiting on Parts").length > 0 && <div className="alert-banner alert-danger">
+              {isAdmin && !isAlertDismissed("parts") && jobData.filter((job) => job.status === "Waiting on Parts").length > 0 && <div className="alert-banner alert-danger">
                 <span className="alert-icon">!</span>
                 <div><b>{jobData.filter((job) => job.status === "Waiting on Parts").length} {t("adminPendingParts")}</b></div>
                 <button onClick={() => { setJobFilter("Waiting on Parts"); setSection("jobs"); }}>{t("reviewParts")}</button>
+                <button className="alert-dismiss" aria-label={t("dismiss")} onClick={() => dismissAlert("parts")}>×</button>
               </div>}
-              {isAdmin && jobData.filter((job) => job.status === "Ready for Invoicing").length > 0 && <div className="alert-banner alert-danger">
+              {isAdmin && !isAlertDismissed("invoicing") && jobData.filter((job) => job.status === "Ready for Invoicing").length > 0 && <div className="alert-banner alert-danger">
                 <span className="alert-icon">!</span>
                 <div><b>{jobData.filter((job) => job.status === "Ready for Invoicing").length} {t("adminReadyForInvoicing")}</b></div>
                 <button onClick={() => { setJobFilter("Ready for Invoicing"); setSection("jobs"); }}>{t("reviewInvoicing")}</button>
+                <button className="alert-dismiss" aria-label={t("dismiss")} onClick={() => dismissAlert("invoicing")}>×</button>
               </div>}
-              {jobData.filter((job) => job.status === "Scheduled").length > 0 && <div className="alert-banner">
+              {!isAlertDismissed("scheduled") && jobData.filter((job) => job.status === "Scheduled").length > 0 && <div className="alert-banner">
                 <span className="alert-icon">!</span>
                 <div><b>{jobData.filter((job) => job.status === "Scheduled").length} {t("scheduledJobsNotice")}</b></div>
                 <button onClick={() => { setJobFilter("Scheduled"); setSection("jobs"); }}>{t("reviewScheduled")}</button>
+                <button className="alert-dismiss" aria-label={t("dismiss")} onClick={() => dismissAlert("scheduled")}>×</button>
               </div>}
-              {unitData.filter((unit) => pmDueForUnit(unit)).length > 0 && <div className="alert-banner">
+              {!isAlertDismissed("pm") && unitData.filter((unit) => pmDueForUnit(unit)).length > 0 && <div className="alert-banner">
                 <span className="alert-icon">!</span>
                 <div>
                   <b>{unitData.filter((unit) => pmDueForUnit(unit)).length} {t("overduePm")}</b>
                   <span>{language === "en" ? " Schedule service before they go back on the road." : " Planifiez le service avant leur retour sur la route."}</span>
                 </div>
                 <button onClick={() => setSection("units")}>{t("reviewUnits")}</button>
+                <button className="alert-dismiss" aria-label={t("dismiss")} onClick={() => dismissAlert("pm")}>×</button>
               </div>}
               <section className="metrics-grid">
                 <div className="section-card metric-group">
@@ -2245,6 +2279,7 @@ export default function Home() {
                         <div><span>{t("status")}</span><strong className={`detail-meta-pill status-${activeJob.status.toLowerCase().replaceAll(" ", "-")}`}>{t(activeJob.status)}</strong></div>
                         <div><span>{t("priority")}</span><strong className={`detail-meta-pill priority-${activeJob.priority.toLowerCase()}`}>{t(activeJob.priority)}</strong></div>
                         <div><span>PM</span><strong className={`detail-meta-pill ${due ? "detail-meta-due" : "detail-meta-clear"}`}>{due ? t("pmDue") : t("pmClear")}</strong></div>
+                        <div className="detail-meta-hours"><span>{t("totalWorked")}</span><strong>{workedHoursFor(activeJob.id)} h</strong></div>
                       </div>;
                     })()}
                     <span className="work-order-total-hours">{t("totalWorked")}: {workedHoursFor(activeJob.id)} h</span>

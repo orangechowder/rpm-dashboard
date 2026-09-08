@@ -452,6 +452,8 @@ label {
   font-size: 11px;
   font-weight: 800;
 }
+.alert-dismiss { margin-left: 8px !important; padding: 0 4px; font-size: 16px; line-height: 1; opacity: .55; }
+.alert-dismiss:hover { opacity: 1; }
 .metrics-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -1792,6 +1794,7 @@ td small {
 }
 .detail-meta-grid strong { min-width: 0; overflow-wrap: anywhere; color: #202b3d; font-size: 14px; font-weight: 800; }
 .detail-meta-grid .missing-unit-badge { display: inline-flex; width: fit-content; padding: 5px 8px; border: 1px solid #f5caca; border-radius: 999px; background: #fff1f0; color: #b42318; font-size: 12px; }
+.detail-meta-hours strong { color: #2b9862; font-size: 16px; font-variant-numeric: tabular-nums; }
 .detail-meta-pill { display: inline-flex; width: fit-content; padding: 5px 9px; border-radius: 999px; font-size: 11px !important; }
 .detail-meta-pill.status-in-progress { background: #fff1f0; color: #b42318; }
 .detail-meta-pill.status-waiting-on-parts,.detail-meta-pill.status-waiting-on-estimates { background: #fff8e8; color: #a67825; }
