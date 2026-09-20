@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clearOfflineMutations, enqueueOfflineMutation, mergeRemoteRecords, readOfflineMutations, recordsEqual, remoteWins, resolvePmConfig, validateCompletion, withRetry, type StorageLike } from "./reliability";
+import { calculateBillableHours, calculateGrossPay, calculateLostTimeCost, calculateNetPayableHours, clearOfflineMutations, enqueueOfflineMutation, mergeRemoteRecords, readOfflineMutations, recordsEqual, remoteWins, resolvePmConfig, validateCompletion, withRetry, type StorageLike } from "./reliability";
 
 const memoryStorage = (): StorageLike => {
   const values = new Map<string, string>();
@@ -88,6 +88,30 @@ describe("resolvePmConfig", () => {
     );
     expect(resolved.interval).toBe(15000);
     expect(resolved.checklist).toEqual({ brakes: "manual" });
+  });
+});
+
+describe("payroll calculations", () => {
+  it("subtracts unpaid break minutes from gross hours for net payable hours", () => {
+    expect(calculateNetPayableHours({ totalHours: 8, breakMinutes: 30 })).toBeCloseTo(7.5);
+    expect(calculateNetPayableHours({ totalHours: null, breakMinutes: 30 })).toBe(0);
+    expect(calculateNetPayableHours({ totalHours: 1, breakMinutes: 120 })).toBe(0);
+  });
+
+  it("further subtracts lost time minutes for billable hours, but not from net payable hours", () => {
+    const entry = { totalHours: 8, breakMinutes: 30, lostTimeMinutes: 60 };
+    expect(calculateNetPayableHours(entry)).toBeCloseTo(7.5);
+    expect(calculateBillableHours(entry)).toBeCloseTo(6.5);
+  });
+
+  it("computes gross pay from net payable hours and hourly rate", () => {
+    expect(calculateGrossPay({ totalHours: 8, breakMinutes: 30 }, 20)).toBeCloseTo(150);
+    expect(calculateGrossPay({ totalHours: 8, breakMinutes: 30 }, null)).toBe(0);
+  });
+
+  it("calculates lost-time cost from minutes and hourly rate", () => {
+    expect(calculateLostTimeCost(90, 30)).toBeCloseTo(45);
+    expect(calculateLostTimeCost(0, 40)).toBe(0);
   });
 });
 

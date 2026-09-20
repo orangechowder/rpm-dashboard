@@ -29,6 +29,13 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .punch-history-controls-row { display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%; }
 .punch-history-controls-row .punch-history-admin-controls { margin:0; grid-column:auto; grid-row:auto; flex:1 1 auto; }
 .punch-history-controls-row .punch-period-controls { display:flex; align-items:center; justify-content:flex-end; gap:5px; padding:0; flex:0 0 auto; }
+.payroll-period-preset { min-width:190px; flex:0 1 240px; }
+.my-payroll-toolbar { justify-content:flex-end; margin-bottom:14px; }
+.user-rate-field { display:flex; align-items:center; gap:6px; color:#647185; font-size:11px; white-space:nowrap; }
+.user-rate-field input { width:92px; min-width:0; }
+.user-rate-save { min-height:30px; padding:4px 8px; }
+.profitability-table { display:block; overflow-x:auto; }
+.profitability-table table { min-width:520px; }
 @media (min-width:701px) {
   .punch-history-section .punch-history-admin-controls { grid-column:1 / -1; grid-row:2; }
   .punch-history-section .punch-period-controls { grid-column:1; grid-row:3; }
@@ -44,6 +51,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   .punch-history-section { display:block !important; }
   .punch-history-section .punch-history-heading { display:flex !important; flex-direction:column; gap:8px; }
   .punch-history-controls-row { align-items:stretch; flex-direction:column; }
+  .punch-history-controls-row > * { max-width:100%; }
+  .payroll-period-preset { width:100%; min-width:0; flex:1 1 auto; }
+  .my-payroll-toolbar { margin-bottom:10px; }
   .punch-history-controls-row .punch-period-controls { justify-content:flex-start; flex-wrap:wrap; }
   .punch-history-admin-controls { width:100%; flex-wrap:wrap; margin-top:0; }
   .punch-history-admin-controls .outline-button,.punch-history-admin-controls select { flex:1 1 150px; min-height:44px; }
@@ -155,6 +165,12 @@ body {
 .unit-form-field { display:grid; min-width:0; gap:7px; color:#647185; font-size:11px; letter-spacing:0; }
 .unit-form-field > label { display:block; width:fit-content; cursor:pointer; }
 .unit-form-field > input,.unit-form-field > select { min-width:0; width:100%; }
+.unit-notes-section { display:grid; gap:10px; margin-top:16px; padding-top:14px; border-top:1px solid var(--line); }
+.unit-notes-list { display:grid; gap:8px; max-height:180px; overflow:auto; }
+.unit-note { padding:10px 12px; border:1px solid var(--line); border-radius:6px; background:#fafbfc; }
+.unit-note p { margin:0 0 5px; color:#344055; font-size:13px; white-space:pre-wrap; }
+.unit-note small { color:#8a94a6; font-size:11px; }
+.unit-notes-section textarea { min-height:72px; resize:vertical; }
 .tech-list-toggle { display:flex; align-items:center; gap:6px; color:#647185; font-size:10px; font-weight:700; white-space:nowrap; }.tech-list-toggle input { accent-color:var(--red); }.managed-password-editor { display:flex; gap:6px; align-items:center; }.managed-password-editor input { width:120px; height:30px; padding:0 7px; border:1px solid var(--line); border-radius:4px; font-size:10px; }.managed-password-editor .primary-button { padding:7px 8px; font-size:10px; }.client-card-copy { flex:1; min-width:0; }.client-actions { display:flex; gap:8px; align-items:center; }.client-actions .row-action { color:#647185; font-size:10px; letter-spacing:0; }.client-edit-form { display:grid; flex:1; gap:7px; }.client-edit-form input { width:100%; height:30px; padding:0 7px; border:1px solid var(--line); border-radius:4px; outline:0; font-size:10px; }.client-edit-form .primary-button,.client-edit-form .outline-button { padding:6px 8px; font-size:9px; }
 .history-button { padding:6px 8px; border:1px solid var(--line); border-radius:4px; background:#fff; color:#647185; font-size:10px; font-weight:700; white-space:nowrap; }.service-history-list { display:grid; gap:8px; }.service-history-row { display:grid; grid-template-columns:1fr 110px 70px auto; gap:10px; align-items:center; padding:12px; border:1px solid #edf0f4; border-radius:6px; }.service-history-row strong,.service-history-row small { display:block; }.service-history-row strong { color:#344055; font-size:11px; }.service-history-row small,.service-history-row span { margin-top:4px; color:#98a1b2; font-size:10px; }.service-history-row b { color:#2b9862; font-size:11px; }
 @media (max-width:700px) { .topbar { height:70px; }.brand-logo { width:78px; height:52px; } }
@@ -1202,7 +1218,7 @@ td small {
 }
 .note-item {
   position: relative;
-  padding-right: 62px;
+  padding-right: 104px;
 }
 .note-item input {
   width: 100%;
@@ -1218,6 +1234,7 @@ td small {
   color: #c23d3d;
   font-size: 10px;
   font-weight: 700;
+  white-space: nowrap;
 }
 .note-item .entry-delete {
   position: absolute;
@@ -1361,6 +1378,9 @@ td small {
   select,
   textarea,
   button { font-size:13px !important; }
+  /* The generic button rule above defeats modal-close's font-size:0 text-hiding trick,
+     which otherwise leaves the raw "×" text node visible alongside the ::before "×". */
+  .modal-close { font-size: 0 !important; }
   .nav-item,
   .mobile-nav-select,
   .mobile-nav-select select,
@@ -1464,10 +1484,21 @@ td small {
   .full-card {
     padding: 18px 14px;
   }
-  .main-content .table-wrap { overflow:visible; }
-  .main-content .full-card .table-wrap { display:none; }
+  .main-content .table-wrap { display:block; width:100%; max-width:100%; overflow-x:auto; overflow-y:hidden; }
+  .main-content .full-card .table-wrap { display:block; width:100%; max-width:100%; overflow-x:auto; }
   .main-content .full-card.punch-page-card .table-wrap { display:block; overflow-x:auto; }
   .main-content .full-card.punch-page-card .punch-history-table { min-width:680px; }
+  .main-content .full-card .admin-summary-table { display:block; overflow-x:auto; }
+  .main-content .full-card .admin-summary-table table { min-width:680px; }
+  .main-content .full-card .bottom-grid .table-wrap { display:block; overflow-x:auto; }
+  .main-content .full-card .profitability-table { display:block; overflow-x:auto; }
+  .main-content .full-card .profitability-table table { min-width:520px; }
+  .metrics-grid { grid-template-columns:1fr; gap:12px; }
+  .technician-payroll-card .metrics-grid { grid-template-columns:1fr; }
+  .metric-card { min-width:0; padding:16px; }
+  .metric-number { font-size:24px; }
+  .full-card { padding:12px; }
+  .full-card .toolbar { gap:12px; margin-bottom:14px; }
   .punch-page-card .punch-clock {
     position: relative;
     left: auto;
@@ -1636,7 +1667,9 @@ td small {
     gap: 6px;
   }
   .detail-section { margin-top:16px; padding-top:14px; }
-  .note-item,.line-item { padding:10px; }
+  .note-item { padding:10px; padding-right:104px; }
+  .line-item { padding:10px; }
+  .note-item .entry-delete { top:8px; right:8px; }
   .detail-modal .modal-actions { gap:8px; margin-top:16px; }
   .detail-modal .modal-actions button { min-height:38px; padding:8px 10px; }
   .line-item-list {
@@ -2078,3 +2111,65 @@ tbody tr:hover { background: #fbfcfe; }
   .metric-group:nth-child(2)::before { background: #3780db; }
   .metric-group:nth-child(3)::before { background: #2b9862; }
 }
+
+/* Unit card grid: each unit becomes a self-contained card that reflows without horizontal
+   overflow, text clipping, or squished borders at any viewport width. Cards use a wide
+   minimum column so they read as rectangles (wide, shallow) instead of near-square tiles. */
+.unit-list.card-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 14px;
+  border-top: 0;
+}
+@media (min-width: 560px) {
+  .unit-list.card-grid { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+}
+.unit-list.card-grid .unit-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  align-content: flex-start;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--ds-border, var(--line));
+  border-radius: 10px;
+  background: #fff;
+}
+.unit-list.card-grid .unit-row > * {
+  min-width: 0 !important;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.unit-list.card-grid .unit-primary {
+  flex: 1 1 100%;
+  min-width: 0 !important;
+}
+.unit-list.card-grid .unit-row > div:not(.unit-primary):not(.unit-avatar),
+.unit-list.card-grid .unit-meter-summary,
+.unit-list.card-grid .unit-due {
+  flex: 1 1 calc(50% - 5px) !important;
+  min-width: 0 !important;
+  padding-left: 0 !important;
+}
+.unit-list.card-grid .unit-primary b,
+.unit-list.card-grid .unit-primary span,
+.unit-list.card-grid .unit-row > div b,
+.unit-list.card-grid .unit-row > div span,
+.unit-list.card-grid .unit-row > div small,
+.unit-list.card-grid .unit-meter-summary b,
+.unit-list.card-grid .unit-meter-summary label,
+.unit-list.card-grid .unit-meter-summary small {
+  overflow-wrap: anywhere;
+  white-space: normal !important;
+}
+.unit-list.card-grid .unit-row > .history-button,
+.unit-list.card-grid .unit-row > .row-action {
+  flex: 1 1 calc(50% - 5px);
+}
+

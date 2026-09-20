@@ -115,6 +115,35 @@ export function resolvePmConfig(template: PmConfig, checklist?: Partial<PmConfig
   };
 }
 
+export type PayrollTimeEntry = {
+  totalHours: number | null;
+  breakMinutes?: number | null;
+  lostTimeMinutes?: number | null;
+};
+
+// Unpaid meal breaks reduce net payable hours; lost time (waiting on parts, shop downtime, etc.)
+// is still paid, so it's tracked separately and only subtracted when computing billable hours.
+export function calculateNetPayableHours(entry: PayrollTimeEntry): number {
+  if (entry.totalHours == null) return 0;
+  return Math.max(0, entry.totalHours - (entry.breakMinutes ?? 0) / 60);
+}
+
+export function calculateBillableHours(entry: PayrollTimeEntry): number {
+  return Math.max(0, calculateNetPayableHours(entry) - (entry.lostTimeMinutes ?? 0) / 60);
+}
+
+export function calculateGrossPay(entry: PayrollTimeEntry, hourlyRate: number | null | undefined): number {
+  if (!hourlyRate) return 0;
+  return calculateNetPayableHours(entry) * hourlyRate;
+}
+
+export function calculateLostTimeCost(lostTimeMinutes: number | null | undefined, hourlyRate: number | null | undefined): number {
+  const minutes = Number(lostTimeMinutes ?? 0);
+  const rate = Number(hourlyRate ?? 0);
+  if (!Number.isFinite(minutes) || !Number.isFinite(rate) || minutes <= 0 || rate <= 0) return 0;
+  return (minutes / 60) * rate;
+}
+
 export function enqueueOfflineMutation<T>(storage: StorageLike, key: string, payload: T, id = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`): OfflineMutation<T>[] {
   const existing = readOfflineMutations<T>(storage, key);
   const next = [...existing, { id, createdAt: new Date().toISOString(), payload }];

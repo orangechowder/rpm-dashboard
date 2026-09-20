@@ -3,11 +3,12 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Image from "next/image";
 import { clearOfflineMutations, enqueueOfflineMutation, mergeRemoteRecords, readOfflineMutations, recordsEqual, remoteWins, validateCompletion } from "../lib/reliability";
-import { completeTimeEntry, createManualTimeEntry, createTimeEntry, hasSupabaseConfig, loadFleetData, loadTimeEntries, loadUsers, removeJob, removeTimeEntry, removeUnit, removeUserAccount, saveJobs, saveUnits, saveUsers, subscribeToFleet, updateTimeEntry, writeActivityLog, type RealtimeChange, type CloudJob, type CloudTimeEntry, type CloudUnit, type CloudUser } from "../lib/fleet-repository";
+import { completeTimeEntry, createManualTimeEntry, createTimeEntry, hasSupabaseConfig, loadDailyTimesheetSummary, loadFleetData, loadPayrollLocks, loadTimeEntries, loadUnitNotes, loadUsers, loadWeeklyTimesheetSummary, removeJob, removeTimeEntry, removeUnit, removeUserAccount, saveJobs, saveUnits, saveUsers, subscribeToFleet, updateTimeEntry, upsertPayrollLock, writeActivityLog, type CloudJob, type CloudTimeEntry, type CloudUnit, type CloudUser, type DailyTimesheetSummaryRow, type PayrollPeriodLock, type RealtimeChange, type UnitNote, type WeeklyTimesheetSummaryRow } from "../lib/fleet-repository";
+import { supabase } from "../lib/supabase";
 
-type Section = "overview" | "jobs" | "units" | "users" | "clients" | "punch";
+type Section = "overview" | "jobs" | "units" | "users" | "clients" | "punch" | "payroll" | "profitability" | "technicianPayroll";
 type Language = "en" | "fr";
-type UserAccount = { id: string; name: string; role: "Admin" | "Technician"; password: string; active: boolean; isTechnician: boolean };
+type UserAccount = { id: string; name: string; role: "Admin" | "Technician"; password: string; active: boolean; isTechnician: boolean; hourlyRate?: number | null };
 type JobStatus =
   "Scheduled" | "In Progress" | "Waiting on Parts" | "Waiting on Estimates" | "Ready for Invoicing" | "Completed";
 type Note = { id: string; text: string; author: string; createdAt: string };
@@ -171,6 +172,156 @@ const navItems: { id: Section; label: string; icon: string }[] = [
   { id: "units", label: "unitManagement", icon: "▣" },
   { id: "clients", label: "clientManagement", icon: "◇" },
 ];
+
+function formatDurationHours(value: number | null | undefined): string {
+  const totalMinutes = Math.max(0, Number(value ?? 0) * 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = Math.round(totalMinutes % 60);
+  return `${hours}h ${String(minutes).padStart(2, "0")}`;
+}
+
+const torontoTimeFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/Toronto",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+function formatTorontoTime(value: string | null | undefined): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "—" : torontoTimeFormatter.format(date);
+}
+
+const torontoDateFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/Toronto",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+const torontoHourFormatter = new Intl.DateTimeFormat("en-US", { timeZone: "America/Toronto", hour: "numeric", hourCycle: "h23" });
+
+function torontoDateKey(value: string): string {
+  return torontoDateFormatter.format(new Date(value));
+}
+
+type AutoLunchProposal = { key: string; userId: string; workDate: string; previousEntryId: string; nextEntryId: string; minutes: number };
+
+function autoLunchProposals(entries: CloudTimeEntry[]): AutoLunchProposal[] {
+  const byDay = new Map<string, CloudTimeEntry[]>();
+  for (const entry of entries.filter((candidate) => candidate.status === "completed" && candidate.clockOut)) {
+    const key = `${entry.userId}:${torontoDateKey(entry.clockIn)}`;
+    byDay.set(key, [...(byDay.get(key) ?? []), entry]);
+  }
+  return Array.from(byDay.entries()).flatMap(([dayKey, dayEntries]) => {
+    const ordered = dayEntries.sort((left, right) => new Date(left.clockIn).getTime() - new Date(right.clockIn).getTime());
+    const candidates = ordered.slice(0, -1).flatMap((entry, index) => {
+      const next = ordered[index + 1];
+      const gapStart = new Date(entry.clockOut as string);
+      const gapEnd = new Date(next.clockIn);
+      const minutes = Math.round((gapEnd.getTime() - gapStart.getTime()) / 60000);
+      const startHour = Number(torontoHourFormatter.format(gapStart));
+      const endHour = Number(torontoHourFormatter.format(gapEnd));
+      return minutes >= 20 && minutes <= 90 && startHour < 15 && endHour >= 11 ? [{ key: `${dayKey}:${entry.id}:${next.id}`, userId: entry.userId, workDate: torontoDateKey(entry.clockIn), previousEntryId: entry.id, nextEntryId: next.id, minutes }] : [];
+    });
+    if (!candidates.length) return [];
+    return [candidates.sort((left, right) => right.minutes - left.minutes)[0]];
+  });
+}
+
+function dailySpanHours(summary: Record<string, any>): number {
+  const start = new Date(String(summary.day_start ?? "")).getTime();
+  const end = new Date(String(summary.day_end ?? "")).getTime();
+  return Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, (end - start) / 3600000) : 0;
+}
+
+function dailyMetrics(summary: Record<string, any>, proposals: AutoLunchProposal[], entries: CloudTimeEntry[] = []): { rawHours: number; breakMinutes: number; lostTimeMinutes: number; netPayableHours: number; billableHours: number } {
+  const userId = String(summary.user_id ?? summary.userId ?? "");
+  const workDate = String(summary.work_date ?? summary.workDate ?? "");
+  const key = `${userId}:${workDate}`;
+  const proposedLunch = proposals.find((proposal) => `${proposal.userId}:${proposal.workDate}` === key)?.minutes ?? 0;
+  const dayEntries = entries.filter((entry) => entry.userId === userId && torontoDateKey(entry.clockIn) === workDate);
+  const storedBreak = dayEntries.length ? dayEntries.reduce((sum, entry) => sum + Number(entry.breakMinutes ?? 0), 0) : Number(summary.break_minutes ?? summary.breakMinutes ?? 0);
+  const breakMinutes = storedBreak >= proposedLunch ? storedBreak : storedBreak + proposedLunch;
+  const lostTimeMinutes = dayEntries.length ? dayEntries.reduce((sum, entry) => sum + Number(entry.lostTimeMinutes ?? 0), 0) : Number(summary.lost_time_minutes ?? summary.lostTimeMinutes ?? 0);
+  const rawHours = dailySpanHours({ ...summary, day_start: summary.day_start ?? summary.dayStart, day_end: summary.day_end ?? summary.dayEnd });
+  return { rawHours, breakMinutes, lostTimeMinutes, netPayableHours: Math.max(rawHours - breakMinutes / 60, 0), billableHours: Math.max(rawHours - breakMinutes / 60 - lostTimeMinutes / 60, 0) };
+}
+
+function unaccountedIdleMinutes(entries: CloudTimeEntry[], summaries: Array<Record<string, any>>): Map<string, number> {
+  const entriesByDay = new Map<string, CloudTimeEntry[]>();
+  for (const entry of entries) {
+    const rawEntry = entry as CloudTimeEntry & Record<string, any>;
+    const userId = String(rawEntry.userId ?? rawEntry.user_id ?? "");
+    const clockIn = String(rawEntry.clockIn ?? rawEntry.clock_in ?? "");
+    const key = `${userId}:${torontoDateKey(clockIn)}`;
+    const dayEntries = entriesByDay.get(key) ?? [];
+    dayEntries.push(entry);
+    entriesByDay.set(key, dayEntries);
+  }
+  return new Map(summaries.map((summary) => {
+    const key = `${summary.user_id}:${summary.work_date}`;
+    const dayEntries = entriesByDay.get(key) ?? [];
+    const dayStart = new Date(String(summary.day_start ?? "")).getTime();
+    const dayEnd = new Date(String(summary.day_end ?? "")).getTime();
+    const envelopeMinutes = Number.isFinite(dayStart) && Number.isFinite(dayEnd) ? Math.max(0, (dayEnd - dayStart) / 60000) : 0;
+    const accountedMinutes = dayEntries.reduce((total, entry) => {
+      const rawEntry = entry as CloudTimeEntry & Record<string, any>;
+      return total + Number(rawEntry.totalHours ?? rawEntry.total_hours ?? 0) * 60 + Number(rawEntry.breakMinutes ?? rawEntry.break_minutes ?? 0) + Number(rawEntry.lostTimeMinutes ?? rawEntry.lost_time_minutes ?? 0);
+    }, 0);
+    return [key, Math.max(0, Math.round(envelopeMinutes - accountedMinutes))];
+  }));
+}
+
+function formatMinutes(value: number | null | undefined): string {
+  const totalMinutes = Math.max(0, Number(value ?? 0));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = Math.round(totalMinutes % 60);
+  return `${hours}h ${String(minutes).padStart(2, "0")}`;
+}
+
+function isoDate(when: Date): string {
+  return new Date(when.getTime() - when.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+
+function weekStart(date: Date): Date {
+  const next = new Date(date);
+  next.setHours(0, 0, 0, 0);
+  const day = next.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  next.setDate(next.getDate() + diff);
+  return next;
+}
+
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+type PayrollPeriodPreset = "thisWeek" | "lastWeek" | "thisMonth" | "lastMonth";
+
+function payrollPeriodRange(preset: PayrollPeriodPreset, reference = new Date()): { start: string; end: string } {
+  const currentWeek = weekStart(reference);
+  if (preset === "lastWeek") {
+    const start = addDays(currentWeek, -7);
+    return { start: isoDate(start), end: isoDate(addDays(start, 6)) };
+  }
+  if (preset === "thisMonth" || preset === "lastMonth") {
+    const month = new Date(reference.getFullYear(), reference.getMonth() + (preset === "lastMonth" ? -1 : 0), 1);
+    return { start: isoDate(month), end: isoDate(new Date(month.getFullYear(), month.getMonth() + 1, 0)) };
+  }
+  return { start: isoDate(currentWeek), end: isoDate(addDays(currentWeek, 6)) };
+}
+
+function PayrollPeriodSelect({ value, onChange, language }: { value: PayrollPeriodPreset; onChange: (value: PayrollPeriodPreset) => void; language: Language }) {
+  return <CustomSelect className="payroll-period-preset" value={value} onChange={(next) => onChange(next as PayrollPeriodPreset)} ariaLabel={language === "fr" ? "Période de paie" : "Payroll period"} options={[{ value: "thisWeek", label: language === "fr" ? "Cette semaine" : "This week" }, { value: "lastWeek", label: language === "fr" ? "Semaine dernière" : "Last week" }, { value: "thisMonth", label: language === "fr" ? "Ce mois-ci" : "This month" }, { value: "lastMonth", label: language === "fr" ? "Mois dernier" : "Last month" }]} />;
+}
+
+function sameDay(dateA: string | Date, dateB: string | Date): boolean {
+  const left = new Date(dateA);
+  const right = new Date(dateB);
+  return left.getFullYear() === right.getFullYear() && left.getMonth() === right.getMonth() && left.getDate() === right.getDate();
+}
 const defaultClients = [
   "9056-8288 QC INC", "9173-9417 QC INC", "92186758 QC INC", "9418-8877 QC INC", "9567-0006 Québec inc.", "Acier Jean-Guy Robert", "Albert Fortier", "Annypier Maltais", "Aventura Construction", "Bilodeau Transport", "Bistro Tôt ou Tard", "Bruce Hodgins excavation", "Bryan Desloge", "Calmont Leasing", "Carolyne Lepage", "Cgm Boily Transport", "Clean water works", "Construction GFL Inc", "Crescent Moving and Storage", "Danny Jean", "Denis Houde", "Docteur Pavé", "Entretiens Prime Cuts", "Enviroimpact", "Expoland Exibition", "Fastco Canada", "Fritolay", "George", "Gestion TBL inc", "GFL ENVIRONMENT", "Groupe FP Excavation", "Groupe TruStone Inc", "Habitation Nieka INC", "Inox Milton", "International Equestrian Academy", "Jacques", "Js margins", "Justin", "Justin Courtemanche", "Lauren Moyer", "Les entreprises 3gd inc", "Les entreprises JF", "Les Jardins Lamoureux Gardens", "Les transports à nos trois inc.", "Lm.landry", "Mancini Construction", "Mario Cote INC", "Mon P’tit Rozon", "Normand Masson", "Northern Mat & Bridge", "Pavage Bolduc Inc.", "Pavage Milan", "Pavé Morissette Inc.", "Piscines Boisseau", "Pro-BJ Construction", "Purolator", "Real Bombardier", "Richard Phaneuf", "Shawn Chapman", "Solarium Solutions Rénovations", "Stephane Aston", "Terra solution", "TRANSPORT ANT-PASS LTEE", "Transport Bourassa", "Transport LGR", "Transport Martin Lefebvre", "Transport métropolitain Roy", "Transport OSI", "Transport Somavrac Inc", "Transport Sylvester Et Forget", "Transport TFI / Transport JCG", "Transports Roger léger", "Vert le Futur", "Ville de L'Île-Perrot", "VOLOD Transport INC", "Volvo Action Service", "WBM TRANSPORT", "Xavier Trépanier St-Onge", "Élagage O Max INC", "Élodie Lapensée",
 ];
@@ -262,7 +413,7 @@ function MetricCard({
   );
 }
 
-function PunchClock({ activeEntry, jobs, language, onClockIn, onClockOut }: { activeEntry?: CloudTimeEntry; jobs: Job[]; language: Language; onClockIn: (workOrderId: string | null) => void; onClockOut: () => void }) {
+function PunchClock({ activeEntry, jobs, language, onClockIn, onClockOut, onStartBreak, onEndBreak }: { activeEntry?: CloudTimeEntry; jobs: Job[]; language: Language; onClockIn: (workOrderId: string | null) => void; onClockOut: () => void; onStartBreak: () => void; onEndBreak: () => void }) {
   const [workOrderId, setWorkOrderId] = useState("");
   const [now, setNow] = useState(0);
   useEffect(() => {
@@ -272,7 +423,82 @@ function PunchClock({ activeEntry, jobs, language, onClockIn, onClockOut }: { ac
   }, [activeEntry]);
   const elapsed = activeEntry ? Math.max(0, now - new Date(activeEntry.clockIn).getTime()) : 0;
   const elapsedLabel = `${String(Math.floor(elapsed / 3600000)).padStart(2, "0")}:${String(Math.floor((elapsed % 3600000) / 60000)).padStart(2, "0")}:${String(Math.floor((elapsed % 60000) / 1000)).padStart(2, "0")}`;
-  return <div className={`punch-clock ${activeEntry ? "punch-active" : ""}`}><span className="punch-indicator" /><div className="punch-copy"><strong>{activeEntry ? (language === "en" ? "On the clock" : "Pointé") : (language === "en" ? "Off the clock" : "Non pointé")}</strong><small>{activeEntry ? elapsedLabel : (language === "en" ? "Select a work order first" : "Sélectionnez d'abord un ordre")}</small></div>{!activeEntry ? <><CustomSelect className="w-auto" value={workOrderId} onChange={setWorkOrderId} ariaLabel={language === "en" ? "Assign work order" : "Assigner un ordre de travail"} placeholder={language === "en" ? "Select work order" : "Sélectionner un ordre"} options={jobs.filter((job) => job.status !== "Completed").map((job) => ({ value: job.id, label: `${job.unit} · ${job.client} · ${job.issue}` }))} /><button disabled={!workOrderId} className="punch-button punch-in" onClick={() => onClockIn(workOrderId)}>{language === "en" ? "Clock In" : "Pointer"}</button></> : <button className="punch-button punch-out" onClick={onClockOut}>{language === "en" ? "Clock Out" : "Dépointer"}</button>}</div>;
+  return (
+        <div className={`punch-clock ${activeEntry ? "punch-active" : ""}`}>
+      <span className="punch-indicator" />
+      <div className="punch-copy">
+        <strong>
+          {activeEntry
+            ? language === "en"
+              ? "On the clock"
+              : "Pointé"
+            : language === "en"
+            ? "Off the clock"
+            : "Non pointé"}
+        </strong>
+        <small>
+          {activeEntry
+            ? elapsedLabel
+            : language === "en"
+            ? "Select a work order first"
+            : "Sélectionnez d'abord un ordre"}
+        </small>
+      </div>
+      {!activeEntry ? (
+        <>
+          <CustomSelect
+            className="w-auto"
+            value={workOrderId}
+            onChange={setWorkOrderId}
+            ariaLabel={
+              language === "en"
+                ? "Assign work order"
+                : "Assigner un ordre de travail"
+            }
+            placeholder={
+              language === "en"
+                ? "Select work order"
+                : "Sélectionner un ordre"
+            }
+            options={jobs
+              .filter((job) => job.status !== "Completed")
+              .map((job) => ({
+                value: job.id,
+                label: `${job.unit} · ${job.client} · ${job.issue}`,
+              }))}
+          />
+          <button
+            disabled={!workOrderId}
+            className="punch-button punch-in"
+            onClick={() => onClockIn(workOrderId)}
+          >
+            {language === "en" ? "Clock In" : "Pointer"}
+          </button>
+        </>
+      ) : (
+        <>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button className="punch-button punch-out" onClick={onClockOut}>
+              {language === "en" ? "Clock Out" : "Dépointer"}
+            </button>
+            {!activeEntry.breakStartedAt ? (
+              <button
+                className="outline-button"
+                disabled={false}
+                onClick={onStartBreak}
+              >
+                {language === "en" ? "Start Break" : "Commencer une pause"}
+              </button>
+            ) : (
+              <button className="outline-button" onClick={onEndBreak}>
+                {language === "en" ? "End Break" : "Finir la pause"}
+              </button>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 type SelectOption = { value: string; label: string };
@@ -429,6 +655,7 @@ export default function Home() {
   const [modal, setModal] = useState<"job" | "unit" | "detail" | "history" | null>(null);
   const [completionPrompt, setCompletionPrompt] = useState<{ job: Job; reading: string } | null>(null);
   const [historyUnit, setHistoryUnit] = useState<Unit | null>(null);
+  const [unitNotes, setUnitNotes] = useState<Record<string, UnitNote[]>>({});
   const [detailJobId, setDetailJobId] = useState<string | null>(null);
   const [editingUnitId, setEditingUnitId] = useState<string | null>(null);
   const [returnToJob, setReturnToJob] = useState(false);
@@ -450,6 +677,7 @@ export default function Home() {
     status: "In Progress" as JobStatus,
   });
   const [noteText, setNoteText] = useState("");
+  const [unitNoteText, setUnitNoteText] = useState("");
   const [editingWorkOrderTitle, setEditingWorkOrderTitle] = useState(false);
   const [workOrderTitleDraft, setWorkOrderTitleDraft] = useState("");
   const [lineItem, setLineItem] = useState({
@@ -464,10 +692,32 @@ export default function Home() {
   const [manualTimeHours, setManualTimeHours] = useState("");
   const [adminPunchUser, setAdminPunchUser] = useState("");
   const [adminPunchJob, setAdminPunchJob] = useState("");
+  const [dailyTimesheetSummary, setDailyTimesheetSummary] = useState<DailyTimesheetSummaryRow[]>([]);
+  const [weeklyTimesheetSummary, setWeeklyTimesheetSummary] = useState<WeeklyTimesheetSummaryRow[]>([]);
+  const [payrollRows, setPayrollRows] = useState<Array<Record<string, any>>>([]);
+  const [payrollLoading, setPayrollLoading] = useState(false);
+  const [profitabilityRows, setProfitabilityRows] = useState<Array<Record<string, any>>>([]);
+  const [profitabilitySummaryRows, setProfitabilitySummaryRows] = useState<Array<Record<string, any>>>([]);
+  const [profitabilityLoading, setProfitabilityLoading] = useState(false);
+  const [payrollLocks, setPayrollLocks] = useState<PayrollPeriodLock[]>([]);
+  const [classifyingDay, setClassifyingDay] = useState<{ userId: string; workDate: string } | null>(null);
+  const [classificationBreakMinutes, setClassificationBreakMinutes] = useState("");
+  const [classificationLostMinutes, setClassificationLostMinutes] = useState("");
+  const [classificationReason, setClassificationReason] = useState("Parts wait");
+  const [editingTimeEntryId, setEditingTimeEntryId] = useState<string | null>(null);
+  const [editingTimeEntry, setEditingTimeEntry] = useState<CloudTimeEntry | null>(null);
+  const [autoLunchKeys, setAutoLunchKeys] = useState<string[]>(() => loadStored("rpm-diesel-auto-lunches", []));
   const [punchPeriod, setPunchPeriod] = useState<"day" | "week" | "month">("week");
   const [punchAnchorDate, setPunchAnchorDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [adminSeeAllPunches, setAdminSeeAllPunches] = useState(false);
   const [adminPunchFilter, setAdminPunchFilter] = useState("all");
+  const [payrollPeriodStart, setPayrollPeriodStart] = useState(() => isoDate(weekStart(new Date())));
+  const [payrollPeriodEnd, setPayrollPeriodEnd] = useState(() => isoDate(addDays(weekStart(new Date()), 6)));
+  const [payrollPeriodPreset, setPayrollPeriodPreset] = useState<PayrollPeriodPreset>("thisWeek");
+  const [payrollTechFilter, setPayrollTechFilter] = useState<string[]>([]);
+  const [myPayrollUser, setMyPayrollUser] = useState("");
+  const [payrollSortBy, setPayrollSortBy] = useState("day");
+  const [showPayrollCost, setShowPayrollCost] = useState(true);
   useEffect(() => {
     if (punchPeriod !== "day") return;
     const handleDayNavigation = (event: MouseEvent) => {
@@ -479,9 +729,7 @@ export default function Home() {
       event.stopImmediatePropagation();
       const next = new Date(`${punchAnchorDate}T12:00:00`);
       next.setDate(next.getDate() + (button.textContent?.includes("‹") ? -1 : 1));
-      setPunchAnchorDate(next.toISOString().slice(0, 10));
     };
-    document.addEventListener("click", handleDayNavigation, true);
     return () => document.removeEventListener("click", handleDayNavigation, true);
   }, [punchPeriod, punchAnchorDate]);
   useEffect(() => {
@@ -508,8 +756,6 @@ export default function Home() {
     document.addEventListener("pointerdown", closeWorkOrderUnitPicker, true);
     return () => document.removeEventListener("pointerdown", closeWorkOrderUnitPicker, true);
   }, [workOrderUnitPickerOpen]);
-  const [editingTimeEntryId, setEditingTimeEntryId] = useState<string | null>(null);
-  const [editingTimeEntry, setEditingTimeEntry] = useState<CloudTimeEntry | null>(null);
   // Demo seed data must only be used offline; otherwise a stale local record with no cloud match is "preserved" forever by mergeRemoteRecords.
   const [unitData, setUnitData] = useState<Unit[]>(hasSupabaseConfig ? [] : units);
   const [meterOverrides, setMeterOverrides] = useState<Record<string, Pick<Unit, "currentMeter" | "lastPmMeter" | "pmInterval" | "meterUnit">>>(() => loadStored("rpm-diesel-meter-overrides", {}));
@@ -525,6 +771,12 @@ export default function Home() {
   const remoteUsersUpdate = useRef(false);
   const cloudPollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const cloudRefreshInFlight = useRef(false);
+  // Baselines of last-known-persisted records, keyed by id. Only records whose reference
+  // differs from their baseline are re-saved, so an unrelated state update never re-upserts
+  // (and potentially clobbers) sibling records that this client's copy may be stale on.
+  const jobsSyncBaselineRef = useRef<Map<string, Job>>(new Map());
+  const unitsSyncBaselineRef = useRef<Map<string, Unit>>(new Map());
+  const usersSyncBaselineRef = useRef<Map<string, UserAccount>>(new Map());
   const unitDataRef = useRef(unitData);
   const meterOverridesRef = useRef(meterOverrides);
   const modalSwitchTimer = useRef<number | null>(null);
@@ -583,6 +835,7 @@ export default function Home() {
     clockInThisWorkOrder: language === "en" ? "Clock In on this work order" : "Pointer sur cet ordre",
     addTechnicianTime: language === "en" ? "Add technician time manually" : "Ajouter du temps technicien manuellement",
     hoursDecimal: language === "en" ? "Hours (decimal)" : "Heures (décimal)",
+    myPayroll: language === "en" ? "My Payroll" : "Mes Paies",
     closingMeterReading: language === "en" ? "Closing meter reading" : "Lecture du compteur de fermeture",
     enterCurrentMeter: language === "en" ? "Enter the current meter before completing this work order." : "Entrez le compteur actuel avant de compléter cet ordre.",
     finalMeterReading: language === "en" ? "Final meter reading" : "Lecture finale du compteur",
@@ -657,14 +910,66 @@ export default function Home() {
     window.localStorage.setItem("rpm-diesel-language", JSON.stringify(next));
   };
   const activeTimeEntry = timeEntries.find((entry) => entry.userId === activeUser && entry.status === "active");
+  const lunchProposals = autoLunchProposals(timeEntries);
+  useEffect(() => {
+    if (userAccounts.find((account) => account.name === activeUser)?.role !== "Admin" || (section !== "payroll" && section !== "profitability")) return;
+    const pending = lunchProposals.filter((proposal) => !autoLunchKeys.includes(proposal.key));
+    if (!pending.length) return;
+    let cancelled = false;
+    const applyLunchProposals = async () => {
+      const applied: string[] = [];
+      for (const proposal of pending) {
+        const entry = timeEntries.find((candidate) => candidate.id === proposal.previousEntryId);
+        if (!entry) continue;
+        if ((entry.breakMinutes ?? 0) < proposal.minutes) {
+          await updateTimeEntry({ ...entry, breakMinutes: (entry.breakMinutes ?? 0) + proposal.minutes });
+          if (!cancelled) setTimeEntries((current) => current.map((candidate) => candidate.id === entry.id ? { ...candidate, breakMinutes: (candidate.breakMinutes ?? 0) + proposal.minutes } : candidate));
+          await writeActivityLog("System", "auto_lunch_proposed", "time_entry", entry.id, { field: "break_minutes", old_value: entry.breakMinutes ?? 0, new_value: (entry.breakMinutes ?? 0) + proposal.minutes, proposed: true });
+        }
+        applied.push(proposal.key);
+      }
+      if (!cancelled && applied.length) {
+        setAutoLunchKeys((current) => Array.from(new Set([...current, ...applied])));
+        window.localStorage.setItem("rpm-diesel-auto-lunches", JSON.stringify(Array.from(new Set([...autoLunchKeys, ...applied]))));
+      }
+    };
+    void applyLunchProposals().catch((error) => reportActionError(`Auto lunch update failed: ${(error as Error).message}`));
+    return () => { cancelled = true; };
+  }, [activeUser, userAccounts, section, lunchProposals, autoLunchKeys, timeEntries]);
+  const todaySummary = dailyTimesheetSummary.find((row) => row.userId === activeUser && sameDay(row.workDate, new Date()));
+  const currentWeekSummary = weeklyTimesheetSummary.find((row) => row.userId === activeUser && row.weekStart === isoDate(weekStart(new Date())));
+  const startBreak = async () => {
+    if (!activeTimeEntry) return;
+    const nextEntry = { ...activeTimeEntry, breakStartedAt: new Date().toISOString() };
+    try {
+      await updateTimeEntry(nextEntry);
+      setTimeEntries((current) => current.map((entry) => entry.id === nextEntry.id ? nextEntry : entry));
+    } catch (error) {
+      reportActionError(`Break start failed: ${(error as Error).message}`);
+    }
+  };
+  const endBreak = async () => {
+    if (!activeTimeEntry || !activeTimeEntry.breakStartedAt) return;
+    const breakStarted = new Date(activeTimeEntry.breakStartedAt);
+    const endedAt = new Date();
+    const breakMinutes = Math.max(0, Math.round((endedAt.getTime() - breakStarted.getTime()) / 60000));
+    const nextEntry = { ...activeTimeEntry, breakMinutes: (activeTimeEntry.breakMinutes ?? 0) + breakMinutes, breakStartedAt: null };
+    try {
+      await updateTimeEntry(nextEntry);
+      setTimeEntries((current) => current.map((entry) => entry.id === nextEntry.id ? nextEntry : entry));
+    } catch (error) {
+      reportActionError(`Break end failed: ${(error as Error).message}`);
+    }
+  };
   const clockIn = async (workOrderId: string | null) => {
     if (!activeUser || !workOrderId) return;
     if (activeTimeEntry) {
       reportActionError(language === "en" ? "You're already punched in on another work order. Clock out first." : "Vous êtes déjà pointé sur un autre ordre de travail. Dépointez d'abord.");
       return;
     }
+    const newClockIn = new Date();
     try {
-      const created = await createTimeEntry({ userId: activeUser, userName: activeUser, workOrderId, clockIn: new Date().toISOString() });
+      const created = await createTimeEntry({ userId: activeUser, userName: activeUser, workOrderId, clockIn: newClockIn.toISOString() });
       if (created) {
         setTimeEntries((current) => [created, ...current]);
         const job = jobData.find((item) => item.id === workOrderId);
@@ -672,17 +977,24 @@ export default function Home() {
       }
       else setCloudError(t("cloudTimeMissing"));
     } catch (error) {
-      queueOfflineMutation({ kind: "clock-in", entry: { userId: activeUser, userName: activeUser, workOrderId, clockIn: new Date().toISOString() } });
+      queueOfflineMutation({ kind: "clock-in", entry: { userId: activeUser, userName: activeUser, workOrderId, clockIn: newClockIn.toISOString() } });
       reportActionError(`Clock in failed; punch queued for retry: ${(error as Error).message}`);
     }
   };
   const clockOut = async () => {
     if (!activeTimeEntry) return;
     const clockOutTime = new Date();
+    let nextEntry = { ...activeTimeEntry };
+    if (nextEntry.breakStartedAt) {
+      const breakStarted = new Date(nextEntry.breakStartedAt);
+      const breakMinutes = Math.max(0, Math.round((clockOutTime.getTime() - breakStarted.getTime()) / 60000));
+      nextEntry = { ...nextEntry, breakMinutes: (nextEntry.breakMinutes ?? 0) + breakMinutes, breakStartedAt: null, status: "completed" };
+    }
     const totalHours = (clockOutTime.getTime() - new Date(activeTimeEntry.clockIn).getTime()) / 3600000;
     try {
       await completeTimeEntry(activeTimeEntry.id, clockOutTime.toISOString(), Number(totalHours.toFixed(2)));
-      setTimeEntries((current) => current.map((entry) => entry.id === activeTimeEntry.id ? { ...entry, clockOut: clockOutTime.toISOString(), totalHours: Number(totalHours.toFixed(2)), status: "completed" } : entry));
+      await updateTimeEntry({ ...nextEntry, clockOut: clockOutTime.toISOString(), totalHours: Number(totalHours.toFixed(2)), status: "completed" });
+      setTimeEntries((current) => current.map((entry) => entry.id === activeTimeEntry.id ? { ...entry, ...nextEntry, clockOut: clockOutTime.toISOString(), totalHours: Number(totalHours.toFixed(2)), status: "completed" } : entry));
     } catch (error) {
       queueOfflineMutation({ kind: "clock-out", entry: { id: activeTimeEntry.id, clockOut: clockOutTime.toISOString(), totalHours: Number(totalHours.toFixed(2)) } });
       reportActionError(`Clock out failed; punch queued for retry: ${(error as Error).message}`);
@@ -730,49 +1042,101 @@ export default function Home() {
       setManualTimeHours("");
     } catch (error) { reportActionError(`Manual time entry failed: ${(error as Error).message}`); }
   };
-  const startTimeEntryEdit = (entry: CloudTimeEntry) => {
-    setEditingTimeEntryId(entry.id);
-    setEditingTimeEntry({ ...entry });
+  const openDayClassification = (userId: string, workDate: string) => {
+    setClassifyingDay({ userId, workDate });
+    setClassificationBreakMinutes("");
+    setClassificationLostMinutes("");
+    setClassificationReason("Parts wait");
   };
-  const saveTimeEntryEdit = async () => {
-    if (!editingTimeEntry) return;
-    try {
-      await updateTimeEntry(editingTimeEntry);
-      setTimeEntries((current) => current.map((entry) => entry.id === editingTimeEntry.id ? editingTimeEntry : entry));
-      setEditingTimeEntryId(null);
-      setEditingTimeEntry(null);
-    } catch (error) {
-      reportActionError(`Time entry update failed: ${(error as Error).message}`);
-    }
-  };
-  const deleteTimeEntry = async (entryId: string) => {
-    if (!isAdmin || !confirmDeletion("punch")) return;
-    const entry = timeEntries.find((candidate) => candidate.id === entryId);
-    const linkedJob = entry?.workOrderId ? jobData.find((job) => job.id === entry.workOrderId) : undefined;
-    if (linkedJob?.status === "Completed") {
-      reportActionError(language === "en" ? "Punches linked to completed work orders cannot be deleted." : "Les poinçons liés aux ordres complétés ne peuvent pas être supprimés.");
+  const saveDayClassification = async () => {
+    if (!classifyingDay || !activeUser) return;
+    const summary = [...payrollRows, ...profitabilitySummaryRows].find((row) => row.user_id === classifyingDay.userId && row.work_date === classifyingDay.workDate) ?? (() => {
+      const dayEntries = timeEntries.filter((entry) => entry.userId === classifyingDay.userId && entry.status === "completed" && torontoDateKey(entry.clockIn) === classifyingDay.workDate);
+      if (!dayEntries.length) return null;
+      const starts = dayEntries.map((entry) => new Date(entry.clockIn).getTime());
+      const ends = dayEntries.map((entry) => new Date(entry.clockOut ?? entry.clockIn).getTime());
+      return { user_id: classifyingDay.userId, user_name: dayEntries[0].userName, work_date: classifyingDay.workDate, day_start: new Date(Math.min(...starts)).toISOString(), day_end: new Date(Math.max(...ends)).toISOString(), raw_hours: 0, break_minutes: 0, lost_time_minutes: 0 };
+    })();
+    if (!summary) {
+      reportActionError("No completed time entries were found for this technician and day.");
       return;
     }
+    const breakMinutes = Math.max(0, Number(classificationBreakMinutes || 0));
+    const lostMinutes = Math.max(0, Number(classificationLostMinutes || 0));
+    const remaining = unaccountedIdleMinutes(timeEntries, [summary]).get(`${classifyingDay.userId}:${classifyingDay.workDate}`) ?? 0;
+    if (breakMinutes + lostMinutes > remaining || (lostMinutes > 0 && !classificationReason)) {
+      reportActionError(`Classification must be no more than ${remaining} unclassified minutes.`);
+      return;
+    }
+    const targets = timeEntries.filter((entry) => entry.userId === classifyingDay.userId && entry.status === "completed" && torontoDateKey(entry.clockIn) === classifyingDay.workDate).sort((left, right) => new Date(right.clockOut ?? right.clockIn).getTime() - new Date(left.clockOut ?? left.clockIn).getTime());
+    const target = targets[0];
+    if (!target) return;
+    const nextEntry = { ...target, breakMinutes: (target.breakMinutes ?? 0) + breakMinutes, lostTimeMinutes: (target.lostTimeMinutes ?? 0) + lostMinutes, lostTimeReason: lostMinutes > 0 ? classificationReason : target.lostTimeReason ?? null };
     try {
-      await removeTimeEntry(entryId);
-      setTimeEntries((current) => current.filter((entry) => entry.id !== entryId));
-      if (editingTimeEntryId === entryId) {
-        setEditingTimeEntryId(null);
-        setEditingTimeEntry(null);
-      }
+      await updateTimeEntry(nextEntry);
+      setTimeEntries((current) => current.map((entry) => entry.id === target.id ? nextEntry : entry));
+      if (breakMinutes > 0) await writeActivityLog(activeUser, "time_entry_classified", "time_entry", target.id, { field: "break_minutes", old_value: target.breakMinutes ?? 0, new_value: nextEntry.breakMinutes });
+      if (lostMinutes > 0) await writeActivityLog(activeUser, "time_entry_classified", "time_entry", target.id, { field: "lost_time_minutes", old_value: target.lostTimeMinutes ?? 0, new_value: nextEntry.lostTimeMinutes, reason: classificationReason });
+      setClassifyingDay(null);
     } catch (error) {
-      reportActionError(`Time entry deletion failed: ${(error as Error).message}`);
+      reportActionError(`Day classification failed: ${(error as Error).message}`);
     }
   };
   const currentAccount = userAccounts.find((account) => account.name === activeUser);
   const isAdmin = currentAccount?.role === "Admin";
+  const changePayrollPeriod = (preset: PayrollPeriodPreset) => {
+    const range = payrollPeriodRange(preset);
+    setPayrollPeriodPreset(preset);
+    setPayrollPeriodStart(range.start);
+    setPayrollPeriodEnd(range.end);
+  };
   const confirmDeletion = (kind: "workOrder" | "unit" | "client" | "punch" | "user") => {
     const labels = language === "fr"
       ? { workOrder: "cet ordre de travail", unit: "cette unité", client: "ce client", punch: "ce poinçon", user: "cet utilisateur" }
       : { workOrder: "this work order", unit: "this unit", client: "this client", punch: "this punch entry", user: "this user" };
     return window.confirm(language === "fr" ? `Voulez-vous vraiment supprimer ${labels[kind]} ?` : `Are you sure you want to delete ${labels[kind]}?`);
   };
-  const visibleNavItems = isAdmin ? [...navItems, { id: "users" as Section, label: "userManagement", icon: "♙" }] : navItems;
+  const startTimeEntryEdit = (entry: CloudTimeEntry) => {
+    setEditingTimeEntryId(entry.id);
+    setEditingTimeEntry({ ...entry });
+  };
+  const cancelTimeEntryEdit = () => {
+    setEditingTimeEntryId(null);
+    setEditingTimeEntry(null);
+  };
+  const saveTimeEntryEdit = async () => {
+    if (!editingTimeEntry || !activeUser) return;
+    const previous = timeEntries.find((entry) => entry.id === editingTimeEntry.id);
+    if (!previous) { cancelTimeEntryEdit(); return; }
+    try {
+      await updateTimeEntry(editingTimeEntry);
+      setTimeEntries((current) => current.map((entry) => entry.id === editingTimeEntry.id ? editingTimeEntry : entry));
+      const changes: Array<{ field: string; oldValue: unknown; newValue: unknown }> = [
+        { field: "clock_in", oldValue: previous.clockIn, newValue: editingTimeEntry.clockIn },
+        { field: "clock_out", oldValue: previous.clockOut, newValue: editingTimeEntry.clockOut },
+        { field: "break_minutes", oldValue: previous.breakMinutes ?? 0, newValue: editingTimeEntry.breakMinutes ?? 0 },
+        { field: "lost_time_minutes", oldValue: previous.lostTimeMinutes ?? 0, newValue: editingTimeEntry.lostTimeMinutes ?? 0 },
+        { field: "lost_time_reason", oldValue: previous.lostTimeReason ?? null, newValue: editingTimeEntry.lostTimeReason ?? null },
+      ].filter((change) => JSON.stringify(change.oldValue) !== JSON.stringify(change.newValue));
+      for (const change of changes) {
+        await writeActivityLog(activeUser, "time_entry_edited", "time_entry", editingTimeEntry.id, change);
+      }
+      cancelTimeEntryEdit();
+    } catch (error) {
+      reportActionError(`Punch update failed: ${(error as Error).message}`);
+    }
+  };
+  const deleteTimeEntryRow = async (entryId: string) => {
+    if (!isAdmin || !confirmDeletion("punch")) return;
+    try {
+      await removeTimeEntry(entryId);
+      setTimeEntries((current) => current.filter((entry) => entry.id !== entryId));
+      if (editingTimeEntryId === entryId) cancelTimeEntryEdit();
+    } catch (error) {
+      reportActionError(`Punch deletion failed: ${(error as Error).message}`);
+    }
+  };
+  const visibleNavItems = isAdmin ? [...navItems, { id: "users" as Section, label: "userManagement", icon: "♙" }, { id: "payroll" as Section, label: "Payroll", icon: "$" }, { id: "profitability" as Section, label: language === "fr" ? "Rentabilité" : "Profitability", icon: "◫" }] : [...navItems, { id: "technicianPayroll" as Section, label: "myPayroll", icon: "▤" }];
   const canManageWorkOrders = isAdmin;
   const isMissingUnit = (unitId: string, client: string) => !unitData.some((unit) => unit.unit === unitId && unit.client === client);
   const unitLabelForJob = (unitId: string, client: string) => !isMissingUnit(unitId, client)
@@ -900,7 +1264,7 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
     if (!hasSupabaseConfig) return;
-    Promise.all([loadFleetData(), loadUsers(), loadTimeEntries()]).then(([data, cloudUsers, cloudTimeEntries]) => {
+    Promise.all([loadFleetData(), loadUsers(), loadTimeEntries(), loadUnitNotes()]).then(([data, cloudUsers, cloudTimeEntries, cloudUnitNotes]) => {
       if (cancelled) return;
       if (data) {
         const remoteJobs = (data.jobs as Job[]).map((job) => jobMeterOverridesRef.current[job.id] == null ? job : { ...job, meterReading: jobMeterOverridesRef.current[job.id] });
@@ -920,6 +1284,7 @@ export default function Home() {
       }
       if (cloudUsers?.length) { remoteUsersUpdate.current = true; setUserAccounts(cloudUsers as UserAccount[]); }
       if (cloudTimeEntries) setTimeEntries(cloudTimeEntries);
+      if (cloudUnitNotes) setUnitNotes(cloudUnitNotes.reduce<Record<string, UnitNote[]>>((groups, note) => { const current = groups[note.unitId] ?? []; groups[note.unitId] = [...current, note]; return groups; }, {}));
       setCloudError(null);
       setCloudReady(true);
       setCloudLoading(false);
@@ -931,24 +1296,140 @@ export default function Home() {
     return () => { cancelled = true; };
   }, [activeUser]);
   useEffect(() => {
-    if (!cloudReady || remoteUsersUpdate.current) { remoteUsersUpdate.current = false; return; }
-    void saveUsers(userAccounts).catch((error: Error) => reportActionError(`User data save failed: ${error.message}`));
+    if (!activeUser) return;
+    const refreshTimeSummaries = async () => {
+      try {
+        const [daily, weekly] = await Promise.all([
+          loadDailyTimesheetSummary(activeUser),
+          loadWeeklyTimesheetSummary(activeUser),
+        ]);
+        if (daily) setDailyTimesheetSummary(daily);
+        if (weekly) setWeeklyTimesheetSummary(weekly);
+      } catch (error) {
+        console.warn("Summary refresh failed", error);
+      }
+    };
+    void refreshTimeSummaries();
+  }, [activeUser, cloudReady]);
+  useEffect(() => {
+    if (!isAdmin) return;
+    const refreshPayrollLocks = async () => {
+      try {
+        const locks = await loadPayrollLocks();
+        if (locks) setPayrollLocks(locks);
+      } catch (error) {
+        console.warn("Payroll lock refresh failed", error);
+      }
+    };
+    void refreshPayrollLocks();
+  }, [isAdmin, cloudReady, section]);
+  useEffect(() => {
+    if (!isAdmin || !hasSupabaseConfig || section !== "payroll") return;
+    let active = true;
+    const selectedTechs = payrollTechFilter.length
+      ? payrollTechFilter
+      : userAccounts.filter((account) => account.active && account.isTechnician).map((account) => account.name);
+    const loadPayrollSummary = async () => {
+      setPayrollLoading(true);
+      try {
+        const { data, error } = await supabase!
+          .from("daily_timesheet_summary")
+          .select("user_id,user_name,work_date,day_start,day_end,raw_hours,break_minutes,lost_time_minutes,net_payable_hours,billable_hours")
+          .gte("work_date", payrollPeriodStart)
+          .lte("work_date", payrollPeriodEnd)
+          .in("user_id", selectedTechs)
+          .order("user_id", { ascending: true })
+          .order("work_date", { ascending: true });
+        if (!active) return;
+        if (error) throw error;
+        setPayrollRows((data ?? []) as Array<Record<string, any>>);
+      } catch (error) {
+        if (active) {
+          console.warn("Payroll summary query failed", error);
+          setPayrollRows([]);
+        }
+      } finally {
+        if (active) setPayrollLoading(false);
+      }
+    };
+    void loadPayrollSummary();
+    return () => { active = false; };
+  }, [isAdmin, section, payrollPeriodStart, payrollPeriodEnd, payrollTechFilter, userAccounts]);
+  useEffect(() => {
+    if (!isAdmin || !hasSupabaseConfig || section !== "profitability") return;
+    let active = true;
+    const selectedTechs = payrollTechFilter.length
+      ? payrollTechFilter
+      : userAccounts.filter((account) => account.active && account.isTechnician).map((account) => account.name);
+    const startIso = `${payrollPeriodStart}T00:00:00.000Z`;
+    const endIso = `${payrollPeriodEnd}T23:59:59.999Z`;
+    const loadProfitability = async () => {
+      setProfitabilityLoading(true);
+      try {
+        const [timeEntriesResponse, accountsResponse, summaryResponse] = await Promise.all([
+          supabase!.from("time_entries").select("*").gte("clock_in", startIso).lte("clock_in", endIso).in("user_id", selectedTechs),
+          supabase!.from("user_accounts").select("name,hourly_rate"),
+          supabase!.from("daily_timesheet_summary").select("user_id,user_name,work_date,day_start,day_end,raw_hours,billable_hours").gte("work_date", payrollPeriodStart).lte("work_date", payrollPeriodEnd).in("user_id", selectedTechs),
+        ]);
+        if (!active) return;
+        if (timeEntriesResponse.error) throw timeEntriesResponse.error;
+        const rateMap = Object.fromEntries((accountsResponse.data ?? []).map((account: any) => [String(account.name), Number(account.hourly_rate ?? 0)]));
+        const rows = (timeEntriesResponse.data ?? []).map((entry: any) => {
+          const hourlyRate = Number(rateMap[String(entry.user_id)] ?? 0);
+          return { ...entry, hourly_rate: hourlyRate };
+        });
+        setProfitabilityRows(rows);
+        setProfitabilitySummaryRows(summaryResponse.error ? [] : (summaryResponse.data ?? []));
+      } catch (error) {
+        if (active) {
+          console.warn("Lost-time summary query failed", error);
+          setProfitabilityRows([]);
+        }
+      } finally {
+        if (active) setProfitabilityLoading(false);
+      }
+    };
+    void loadProfitability();
+    return () => { active = false; };
+  }, [isAdmin, section, payrollPeriodStart, payrollPeriodEnd, payrollTechFilter, userAccounts]);
+  useEffect(() => {
+    if (!cloudReady) return;
+    if (remoteUsersUpdate.current) {
+      remoteUsersUpdate.current = false;
+      userAccounts.forEach((account) => usersSyncBaselineRef.current.set(account.id, account));
+      return;
+    }
+    const changedUsers = userAccounts.filter((account) => usersSyncBaselineRef.current.get(account.id) !== account);
+    if (!changedUsers.length) return;
+    void saveUsers(changedUsers).then(() => {
+      changedUsers.forEach((account) => usersSyncBaselineRef.current.set(account.id, account));
+    }).catch((error: Error) => reportActionError(`User data save failed: ${error.message}`));
   }, [userAccounts, cloudReady]);
   useEffect(() => {
-    if (!cloudReady || remoteJobsUpdate.current) {
+    if (!cloudReady) return;
+    if (remoteJobsUpdate.current) {
       remoteJobsUpdate.current = false;
+      jobData.forEach((job) => jobsSyncBaselineRef.current.set(job.id, job));
       return;
     }
-    const persistableJobs = jobData.filter((job) => unitDataRef.current.some((unit) => unit.unit === job.unit && unit.client === job.client));
-    if (!persistableJobs.length) return;
-    void saveJobs(persistableJobs).catch((error: Error) => { queueOfflineMutation({ kind: "jobs", jobs: persistableJobs }); reportActionError(`Work order data save failed; changes queued for retry: ${error.message}`); });
+    const changedJobs = jobData.filter((job) => unitDataRef.current.some((unit) => unit.unit === job.unit && unit.client === job.client) && jobsSyncBaselineRef.current.get(job.id) !== job);
+    if (!changedJobs.length) return;
+    void saveJobs(changedJobs).then(() => {
+      changedJobs.forEach((job) => jobsSyncBaselineRef.current.set(job.id, job));
+    }).catch((error: Error) => { queueOfflineMutation({ kind: "jobs", jobs: changedJobs }); reportActionError(`Work order data save failed; changes queued for retry: ${error.message}`); });
   }, [jobData, cloudReady]);
   useEffect(() => {
-    if (!cloudReady || remoteUnitsUpdate.current) {
+    if (!cloudReady) return;
+    if (remoteUnitsUpdate.current) {
       remoteUnitsUpdate.current = false;
+      unitData.forEach((unit) => unitsSyncBaselineRef.current.set(unitKey(unit), unit));
       return;
     }
-    void saveUnits(unitData).catch((error: Error) => { queueOfflineMutation({ kind: "units", units: unitData }); reportActionError(`Unit data save failed; changes queued for retry: ${error.message}`); });
+    const changedUnits = unitData.filter((unit) => unitsSyncBaselineRef.current.get(unitKey(unit)) !== unit);
+    if (!changedUnits.length) return;
+    void saveUnits(changedUnits).then(() => {
+      changedUnits.forEach((unit) => unitsSyncBaselineRef.current.set(unitKey(unit), unit));
+    }).catch((error: Error) => { queueOfflineMutation({ kind: "units", units: changedUnits }); reportActionError(`Unit data save failed; changes queued for retry: ${error.message}`); });
   }, [unitData, cloudReady]);
   useEffect(() => {
     if (!cloudReady || !hasSupabaseConfig) return;
@@ -997,7 +1478,13 @@ export default function Home() {
           remoteUnitsUpdate.current = true;
           return merged;
         });
-        if (cloudUsers?.length) { remoteUsersUpdate.current = true; setUserAccounts(cloudUsers as UserAccount[]); }
+        if (cloudUsers?.length) {
+          setUserAccounts((current) => {
+            if (recordsEqual(current, cloudUsers)) return current;
+            remoteUsersUpdate.current = true;
+            return cloudUsers as UserAccount[];
+          });
+        }
         if (cloudTimeEntries) setTimeEntries(cloudTimeEntries);
         setCloudError(null);
       }).catch((error: Error) => setCloudError(`Cloud sync retrying: ${error.message}`)).finally(() => {
@@ -1005,7 +1492,7 @@ export default function Home() {
       });
     };
     refreshFromCloud();
-    cloudPollTimer.current = setInterval(refreshFromCloud, 2500);
+    cloudPollTimer.current = setInterval(refreshFromCloud, 30000);
     const applyUserChange = (change: RealtimeChange<CloudUser>) => {
       remoteUsersUpdate.current = true;
       setUserAccounts((current) => {
@@ -1249,6 +1736,7 @@ export default function Home() {
     if (modal === "history") return;
     const storedMeter = meterOverrides[unitKey(unit)];
     setEditingUnitId(unitKey(unit));
+    setUnitNoteText("");
     setForm({
       unit: unit.unit,
       client: unit.client,
@@ -1267,6 +1755,45 @@ export default function Home() {
       status: "In Progress",
     });
     setModal("unit");
+  };
+  const saveUnitNote = async (unit: Unit) => {
+    const text = unitNoteText.trim();
+    if (!text || !activeUser) return;
+    try {
+      const noteId = await writeActivityLog(activeUser, "unit_note_added", "unit", unitKey(unit), { text });
+      const note: UnitNote = { id: noteId ?? `note-${createId()}`, text, author: activeUser, createdAt: new Date().toISOString() };
+      setUnitNotes((current) => ({ ...current, [unitKey(unit)]: [...(current[unitKey(unit)] ?? []), note] }));
+      setUnitNoteText("");
+    } catch (error) {
+      reportActionError(`Unit note was not saved: ${(error as Error).message}`);
+    }
+  };
+  const saveUnitNoteForKey = async (key: string) => {
+    const unit = unitData.find((candidate) => unitKey(candidate) === key);
+    if (unit) await saveUnitNote(unit);
+  };
+  const updateUnitNoteForKey = (key: string, noteId: string, text: string) => {
+    if (!isAdmin) return;
+    setUnitNotes((current) => ({ ...current, [key]: (current[key] ?? []).map((note) => (note.id === noteId ? { ...note, text } : note)) }));
+  };
+  const commitUnitNoteEdit = async (key: string, noteId: string, text: string) => {
+    if (!isAdmin || !activeUser) return;
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    try {
+      await writeActivityLog(activeUser, "unit_note_updated", "unit", key, { noteId, text: trimmed });
+    } catch (error) {
+      reportActionError(`Unit note edit was not saved: ${(error as Error).message}`);
+    }
+  };
+  const deleteUnitNoteForKey = async (key: string, noteId: string) => {
+    if (!isAdmin || !activeUser) return;
+    setUnitNotes((current) => ({ ...current, [key]: (current[key] ?? []).filter((note) => note.id !== noteId) }));
+    try {
+      await writeActivityLog(activeUser, "unit_note_deleted", "unit", key, { noteId });
+    } catch (error) {
+      reportActionError(`Unit note delete was not saved: ${(error as Error).message}`);
+    }
   };
   const openUnitHistory = (unit: Unit) => { setHistoryUnit(unit); setEditingUnitId(null); setModal("history"); };
   const closeModal = () => setModal(null);
@@ -1302,46 +1829,34 @@ export default function Home() {
   };
   const saveNote = () => {
     if (!detailJobId || !noteText.trim()) return;
+    const job = jobData.find((item) => item.id === detailJobId);
+    if (!job) return;
     const note: Note = {
       id: createId(),
       text: noteText.trim(),
       author: activeUser ?? "RPM Diesel",
       createdAt: new Date().toISOString(),
     };
-    setJobData((current) =>
-      current.map((job) =>
-        job.id === detailJobId
-          ? { ...job, notes: [...(job.notes ?? []), note], updated: "Just now" }
-          : job,
-      ),
-    );
+    const updatedJob = { ...job, notes: [...(job.notes ?? []), note], updated: "Just now", updatedAt: new Date().toISOString() };
+    setJobData((current) => current.map((item) => item.id === detailJobId ? updatedJob : item));
+    void saveJobs([updatedJob]).catch((error: Error) => reportActionError(`Note was not saved: ${error.message}`));
     setNoteText("");
   };
   const canManageNote = (note?: Note) => canManageWorkOrders || note?.author === activeUser;
-  const updateNote = (noteId: string, text: string) =>
-    setJobData((current) =>
-      current.map((job) =>
-        job.id === detailJobId
-          ? {
-              ...job,
-              notes: (job.notes ?? []).map((note) =>
-                note.id === noteId && canManageNote(note) ? { ...note, text } : note,
-              ),
-            }
-          : job,
-      ),
-    );
-  const deleteNote = (noteId: string) =>
-    setJobData((current) =>
-      current.map((job) =>
-        job.id === detailJobId
-          ? {
-              ...job,
-              notes: (job.notes ?? []).filter((note) => note.id !== noteId || !canManageNote(note)),
-            }
-          : job,
-      ),
-    );
+  const updateNote = (noteId: string, text: string) => {
+    const job = jobData.find((item) => item.id === detailJobId);
+    if (!job) return;
+    const updatedJob = { ...job, notes: (job.notes ?? []).map((note) => note.id === noteId && canManageNote(note) ? { ...note, text } : note), updatedAt: new Date().toISOString() };
+    setJobData((current) => current.map((item) => item.id === detailJobId ? updatedJob : item));
+    void saveJobs([updatedJob]).catch((error: Error) => reportActionError(`Note update failed: ${error.message}`));
+  };
+  const deleteNote = (noteId: string) => {
+    const job = jobData.find((item) => item.id === detailJobId);
+    if (!job) return;
+    const updatedJob = { ...job, notes: (job.notes ?? []).filter((note) => note.id !== noteId || !canManageNote(note)), updatedAt: new Date().toISOString() };
+    setJobData((current) => current.map((item) => item.id === detailJobId ? updatedJob : item));
+    void saveJobs([updatedJob]).catch((error: Error) => reportActionError(`Note delete failed: ${error.message}`));
+  };
   const saveLineItem = () => {
     if (!detailJobId || !lineItem.description.trim())
       return;
@@ -1936,13 +2451,235 @@ export default function Home() {
             <section className="section-card full-card punch-page-card">
               <div className="toolbar"><div><p className="card-kicker">{t("punchClock")}</p><h2>{t("punchClock")}</h2></div></div>
               <p className="punch-page-copy">{t("punchSubtitle")}</p>
-              <PunchClock activeEntry={activeTimeEntry} jobs={jobData} language={language} onClockIn={clockIn} onClockOut={clockOut} />
+              <PunchClock
+                activeEntry={activeTimeEntry}
+                jobs={jobData}
+                language={language}
+                onClockIn={clockIn}
+                onClockOut={clockOut}
+                onStartBreak={startBreak}
+                onEndBreak={endBreak}
+              />
               {canManageWorkOrders && <><div className="manual-time-card"><div className="detail-section-heading"><h3>{t("addTechnicianTime")}</h3></div><div className="manual-time-form"><CustomSelect value={manualTimeUser} onChange={setManualTimeUser} ariaLabel={t("technician")} placeholder={t("technician")} options={userAccounts.filter((account) => account.active && account.isTechnician).map((account) => ({ value: account.name, label: account.name }))} /><CustomSelect value={manualTimeJob} onChange={setManualTimeJob} ariaLabel={t("workOrder")} placeholder={t("noData")} options={jobData.filter((job) => job.status !== "Completed").map((job) => ({ value: job.id, label: `${job.unit} · ${job.client} · ${job.issue}` }))} /><input type="number" min="0.01" step="0.01" value={manualTimeHours} onChange={(event) => setManualTimeHours(event.target.value)} placeholder={t("hoursDecimal")} aria-label={t("hoursDecimal")} /><button className="primary-button" onClick={addManualTime}>{t("add")}</button></div></div><div className="manual-time-card"><div className="detail-section-heading"><h3>{t("manageLivePunches")}</h3></div><div className="manual-time-form"><CustomSelect value={adminPunchUser} onChange={setAdminPunchUser} ariaLabel={t("technician")} placeholder={t("technician")} options={userAccounts.filter((account) => account.active && account.isTechnician).map((account) => ({ value: account.name, label: account.name }))} /><CustomSelect value={adminPunchJob} onChange={setAdminPunchJob} ariaLabel={t("workOrder")} placeholder={t("noData")} options={jobData.filter((job) => job.status !== "Completed").map((job) => ({ value: job.id, label: `${job.unit} · ${job.client} · ${job.issue}` }))} /><button className="primary-button" disabled={!adminPunchUser || !adminPunchJob} onClick={adminClockIn}>{t("clockInTechnician")}</button></div><div className="admin-active-punches">{timeEntries.filter((entry) => entry.status === "active" && entry.userId !== activeUser).map((entry) => { const linkedJob = jobData.find((job) => job.id === entry.workOrderId); const linkedUnit = linkedJob ? unitData.find((unit) => unit.unit === linkedJob.unit && unit.client === linkedJob.client) : undefined; const jobLabel = linkedJob ? `${linkedJob.unit} · ${linkedJob.client}${linkedUnit?.type ? ` · ${linkedUnit.type}` : ""}` : t("noData"); return <div className="admin-active-punch" key={entry.id}><span><strong>{entry.userName}</strong><small>{jobLabel}</small></span><button className="punch-button punch-out" onClick={() => adminClockOut(entry)}>{t("clockOut")}</button></div>; })}</div></div></>}
               <div className="punch-history-section">
                 <div className="detail-section-heading punch-history-heading"><div><h3>{t("punchHistory")}</h3><span>{periodTimeEntries.length} {t("entries")} · {periodStart.toLocaleDateString(language === "fr" ? "fr-CA" : "en-CA")} - {new Date(periodEnd.getTime() - 86400000).toLocaleDateString(language === "fr" ? "fr-CA" : "en-CA")}</span></div><div className="punch-history-controls-row"><div className="punch-history-admin-controls">{isAdmin && <><button type="button" className="outline-button" onClick={() => { setAdminSeeAllPunches((current) => !current); setAdminPunchFilter("all"); }}>{adminSeeAllPunches ? t("seeMyPunches") : t("seeAllPunches")}</button>{adminSeeAllPunches && <CustomSelect value={adminPunchFilter} onChange={setAdminPunchFilter} ariaLabel={t("filterTechnician")} options={[{ value: "all", label: t("filterTechnician") }, ...userAccounts.filter((account) => account.active && account.isTechnician).map((account) => ({ value: account.name, label: account.name }))]} />}</>}</div><div className="punch-period-controls"><button type="button" className="period-nav-button" onClick={() => { const next = new Date(`${punchAnchorDate}T12:00:00`); if (punchPeriod === "week") next.setDate(next.getDate() - 7); else next.setMonth(next.getMonth() - 1); setPunchAnchorDate(next.toISOString().slice(0, 10)); }} aria-label={t("previousPeriod")}>‹</button><input className="punch-date-picker" type="date" value={punchAnchorDate} onChange={(event) => setPunchAnchorDate(event.target.value)} aria-label={t("chooseDate")} /><button type="button" className="period-nav-button" onClick={() => { const next = new Date(`${punchAnchorDate}T12:00:00`); if (punchPeriod === "week") next.setDate(next.getDate() + 7); else next.setMonth(next.getMonth() + 1); setPunchAnchorDate(next.toISOString().slice(0, 10)); }} aria-label={t("nextPeriod")}>›</button><CustomSelect className="punch-period-select" value={punchPeriod} onChange={(value) => setPunchPeriod(value as "day" | "week" | "month")} ariaLabel={t("punchHistory")} options={[{ value: "day", label: t("day") }, { value: "week", label: t("week") }, { value: "month", label: t("month") }]} /><button type="button" className="period-today-button" onClick={() => setPunchAnchorDate(new Date().toISOString().slice(0, 10))}>{t("currentPeriod")}</button></div></div></div>
                 <div className="punch-day-groups">{punchGroups.map((group) => <div className={`punch-day-group ${group.dayKey === punchDayKey(new Date().toISOString()) ? "punch-day-current" : ""}`} key={group.dayKey}><strong>{group.dayKey === punchDayKey(new Date().toISOString()) ? `${t("today")} · ` : ""}{new Date(`${group.dayKey}T00:00:00`).toLocaleDateString(language === "fr" ? "fr-CA" : "en-CA", { weekday: "long", month: "long", day: "numeric" })}</strong><span>{group.entries.length} {t("entries")}</span></div>)}</div>
-                <div className="table-wrap"><table className="punch-history-table"><thead><tr><th>{t("punchedBy")}</th><th>{t("workOrder")}</th><th>{t("clockIn")}</th><th>{t("clockOut")}</th><th>{t("totalHours")}</th><th>{t("status")}</th>{canManageWorkOrders && <th />}</tr></thead><tbody>{visibleTimeEntries.length ? visibleTimeEntries.map((entry) => editingTimeEntryId === entry.id && editingTimeEntry ? <tr key={entry.id} className="time-entry-edit-row"><td><CustomSelect value={editingTimeEntry.userName} onChange={(value) => setEditingTimeEntry({ ...editingTimeEntry, userId: value, userName: value })} options={userAccounts.filter((account) => account.active && account.isTechnician).map((account) => ({ value: account.name, label: account.name }))} /></td><td><CustomSelect value={editingTimeEntry.workOrderId ?? ""} onChange={(value) => setEditingTimeEntry({ ...editingTimeEntry, workOrderId: value || null })} placeholder={t("noData")} options={jobData.map((job) => ({ value: job.id, label: `${job.unit} · ${job.client} · ${job.issue}` }))} /></td><td><input type="datetime-local" value={toDatetimeLocalValue(editingTimeEntry.clockIn)} onChange={(event) => { const clockIn = fromDatetimeLocalValue(event.target.value) ?? editingTimeEntry.clockIn; const totalHours = editingTimeEntry.clockOut ? Number(((new Date(editingTimeEntry.clockOut).getTime() - new Date(clockIn).getTime()) / 3600000).toFixed(2)) : editingTimeEntry.totalHours; setEditingTimeEntry({ ...editingTimeEntry, clockIn, totalHours }); }} /></td><td><input type="datetime-local" value={toDatetimeLocalValue(editingTimeEntry.clockOut)} onChange={(event) => { const clockOut = fromDatetimeLocalValue(event.target.value); const totalHours = clockOut ? Number(((new Date(clockOut).getTime() - new Date(editingTimeEntry.clockIn).getTime()) / 3600000).toFixed(2)) : editingTimeEntry.totalHours; setEditingTimeEntry({ ...editingTimeEntry, clockOut, status: clockOut ? "completed" : "active", totalHours }); }} /></td><td><input type="number" min="0" step="0.01" value={editingTimeEntry.totalHours ?? ""} onChange={(event) => setEditingTimeEntry({ ...editingTimeEntry, totalHours: event.target.value ? Number(event.target.value) : null })} /></td><td><span className={`time-status ${editingTimeEntry.status === "active" ? "time-active" : "time-completed"}`}>{editingTimeEntry.status === "active" ? t("activePunch") : t("Completed")}</span></td><td><div className="time-entry-actions"><button className="primary-button" onClick={saveTimeEntryEdit}>{t("save")}</button><button className="entry-delete" onClick={() => deleteTimeEntry(entry.id)}>{t("delete")}</button></div></td></tr> : <tr key={entry.id}><td><strong>{entry.userName}</strong></td><td>{entry.workOrderId ? (() => { const linkedJob = jobData.find((job) => job.id === entry.workOrderId); return linkedJob ? `${linkedJob.unit} · ${linkedJob.client} · ${linkedJob.issue}` : entry.workOrderId; })() : t("noData")}</td><td>{new Date(entry.clockIn).toLocaleString()}</td><td>{entry.clockOut ? new Date(entry.clockOut).toLocaleString() : t("activePunch")}</td><td>{entry.totalHours == null ? t("activePunch") : `${entry.totalHours.toFixed(2)} h`}</td><td><span className={`time-status ${entry.status === "active" ? "time-active" : "time-completed"}`}>{entry.status === "active" ? t("activePunch") : t("Completed")}</span></td>{canManageWorkOrders && <td><div className="time-entry-actions"><button className="outline-button" onClick={() => startTimeEntryEdit(entry)}>{t("edit")}</button><button className="entry-delete" onClick={() => deleteTimeEntry(entry.id)}>{t("delete")}</button></div></td>}</tr>) : <tr><td colSpan={canManageWorkOrders ? 7 : 6} className="empty-history">{t("noPunches")}</td></tr>}</tbody></table></div>
+                <div className="table-wrap"><table className="punch-history-table"><thead><tr><th>{t("punchedBy")}</th><th>{t("workOrder")}</th><th>{t("clockIn")}</th><th>{t("clockOut")}</th><th>{t("totalHours")}</th><th>{t("status")}</th>{canManageWorkOrders && <th>Break</th>}{canManageWorkOrders && <th>Lost time</th>}{canManageWorkOrders && <th>Reason</th>}{canManageWorkOrders && <th />}</tr></thead><tbody>{visibleTimeEntries.length ? visibleTimeEntries.map((entry) => editingTimeEntryId === entry.id && editingTimeEntry ? <tr key={entry.id} className="time-entry-edit-row"><td><strong>{entry.userName}</strong></td><td>{entry.workOrderId ? (() => { const linkedJob = jobData.find((job) => job.id === entry.workOrderId); return linkedJob ? `${linkedJob.unit} · ${linkedJob.client} · ${linkedJob.issue}` : entry.workOrderId; })() : t("noData")}</td><td><input type="datetime-local" value={toDatetimeLocalValue(editingTimeEntry.clockIn)} onChange={(event) => { const clockIn = fromDatetimeLocalValue(event.target.value) ?? editingTimeEntry.clockIn; const totalHours = editingTimeEntry.clockOut ? Number(((new Date(editingTimeEntry.clockOut).getTime() - new Date(clockIn).getTime()) / 3600000).toFixed(2)) : editingTimeEntry.totalHours; setEditingTimeEntry({ ...editingTimeEntry, clockIn, totalHours }); }} /></td><td><input type="datetime-local" value={toDatetimeLocalValue(editingTimeEntry.clockOut)} onChange={(event) => { const clockOut = fromDatetimeLocalValue(event.target.value); const totalHours = clockOut ? Number(((new Date(clockOut).getTime() - new Date(editingTimeEntry.clockIn).getTime()) / 3600000).toFixed(2)) : editingTimeEntry.totalHours; setEditingTimeEntry({ ...editingTimeEntry, clockOut, status: clockOut ? "completed" : "active", totalHours }); }} /></td><td><input type="number" min="0" step="0.01" value={editingTimeEntry.totalHours ?? ""} onChange={(event) => setEditingTimeEntry({ ...editingTimeEntry, totalHours: event.target.value ? Number(event.target.value) : null })} /></td><td><span className={`time-status ${editingTimeEntry.status === "active" ? "time-active" : "time-completed"}`}>{editingTimeEntry.status === "active" ? t("activePunch") : t("Completed")}</span></td>{canManageWorkOrders && <td><input type="number" min="0" step="1" value={editingTimeEntry.breakMinutes ?? 0} onChange={(event) => setEditingTimeEntry({ ...editingTimeEntry, breakMinutes: Number(event.target.value) || 0 })} aria-label="Break minutes" /></td>}{canManageWorkOrders && <td><input type="number" min="0" step="1" value={editingTimeEntry.lostTimeMinutes ?? 0} onChange={(event) => setEditingTimeEntry({ ...editingTimeEntry, lostTimeMinutes: Number(event.target.value) || 0 })} aria-label="Lost-time minutes" /></td>}{canManageWorkOrders && <td><select value={editingTimeEntry.lostTimeReason ?? ""} onChange={(event) => setEditingTimeEntry({ ...editingTimeEntry, lostTimeReason: event.target.value || null })} aria-label="Lost-time reason"><option value="">—</option><option>Parts wait</option><option>Traffic</option><option>Admin</option><option>Equipment issue</option><option>Other</option></select></td>}{canManageWorkOrders && <td><div className="time-entry-actions"><button type="button" className="primary-button" onClick={() => void saveTimeEntryEdit()}>{t("save")}</button><button type="button" className="outline-button" onClick={cancelTimeEntryEdit}>{t("cancel")}</button></div></td>}</tr> : <tr key={entry.id}><td><strong>{entry.userName}</strong></td><td>{entry.workOrderId ? (() => { const linkedJob = jobData.find((job) => job.id === entry.workOrderId); return linkedJob ? `${linkedJob.unit} · ${linkedJob.client} · ${linkedJob.issue}` : entry.workOrderId; })() : t("noData")}</td><td>{new Date(entry.clockIn).toLocaleString()}</td><td>{entry.clockOut ? new Date(entry.clockOut).toLocaleString() : t("activePunch")}</td><td>{entry.totalHours == null ? t("activePunch") : `${entry.totalHours.toFixed(2)} h`}</td><td><span className={`time-status ${entry.status === "active" ? "time-active" : "time-completed"}`}>{entry.status === "active" ? t("activePunch") : t("Completed")}</span></td>{canManageWorkOrders && <td>{Math.round(entry.breakMinutes ?? 0)} min</td>}{canManageWorkOrders && <td>{Math.round(entry.lostTimeMinutes ?? 0)} min</td>}{canManageWorkOrders && <td>{entry.lostTimeReason ?? "—"}</td>}{canManageWorkOrders && <td><div className="time-entry-actions"><button type="button" className="outline-button" onClick={() => startTimeEntryEdit(entry)}>{t("edit")}</button><button type="button" className="entry-delete" onClick={() => void deleteTimeEntryRow(entry.id)}>{t("delete")}</button></div></td>}</tr>) : <tr><td colSpan={canManageWorkOrders ? 10 : 6} className="empty-history">{t("noPunches")}</td></tr>}</tbody></table></div>
               </div>
+            </section>
+          )}
+          {section === "technicianPayroll" && activeUser && !isAdmin && (
+            <section className="section-card full-card technician-payroll-card">
+              <div className="toolbar my-payroll-toolbar"><div className="punch-history-controls-row"><PayrollPeriodSelect value={payrollPeriodPreset} onChange={changePayrollPeriod} language={language} /></div></div>
+              {(() => { const payrollUser = isAdmin ? (myPayrollUser || userAccounts.find((account) => account.active && account.isTechnician)?.name || activeUser) : activeUser; const rows = dailyTimesheetSummary.filter((row) => row.userId === payrollUser && row.workDate >= payrollPeriodStart && row.workDate <= payrollPeriodEnd); const metrics = rows.map((row) => dailyMetrics(row as unknown as Record<string, any>, lunchProposals, timeEntries)); const totals = metrics.reduce((sum, value) => ({ rawHours: sum.rawHours + value.rawHours, breakMinutes: sum.breakMinutes + value.breakMinutes, lostTimeMinutes: sum.lostTimeMinutes + value.lostTimeMinutes, netPayableHours: sum.netPayableHours + value.netPayableHours, billableHours: sum.billableHours + value.billableHours }), { rawHours: 0, breakMinutes: 0, lostTimeMinutes: 0, netPayableHours: 0, billableHours: 0 }); const paidLunchHours = rows.length * 0.5; return <><div className="metrics-grid"><MetricCard label="RAW hours" value={`${totals.rawHours.toFixed(2)} h`} detail="Full day span" tone="blue" icon="◷" /><MetricCard label="Net payable" value={`${(totals.netPayableHours + paidLunchHours).toFixed(2)} h`} detail={`Includes ${paidLunchHours.toFixed(1)} h paid lunch`} tone="green" icon="✓" /><MetricCard label="Billable" value={`${totals.billableHours.toFixed(2)} h`} detail="After lost time" tone="red" icon="!" /><MetricCard label="Breaks / lost time" value={`${Math.round(totals.breakMinutes)} / ${Math.round(totals.lostTimeMinutes)} min`} detail="Recorded for this period" tone="orange" icon="•" /></div><div className="table-wrap admin-summary-table"><table><thead><tr><th>Day</th><th>RAW</th><th>Net payable</th><th>Billable</th><th>Break</th><th>Lost time</th></tr></thead><tbody>{rows.map((row) => { const value = dailyMetrics(row as unknown as Record<string, any>, lunchProposals, timeEntries); return <tr key={row.workDate}><td>{row.workDate}</td><td>{value.rawHours.toFixed(2)} h</td><td>{(value.netPayableHours + 0.5).toFixed(2)} h</td><td>{value.billableHours.toFixed(2)} h</td><td>{Math.round(value.breakMinutes)} min</td><td>{Math.round(value.lostTimeMinutes)} min</td></tr>; })}</tbody></table></div>{!rows.length && <p className="empty-history">No payroll entries for this period.</p>}</>; })()}
+            </section>
+          )}
+          {section === "payroll" && isAdmin && (
+            <section className="section-card full-card">
+              <div className="toolbar">
+                <div>
+                  <p className="card-kicker">Payroll</p>
+                  <h2>Admin Payroll</h2>
+                </div>
+                <div className="punch-history-controls-row">
+                  <PayrollPeriodSelect value={payrollPeriodPreset} onChange={changePayrollPeriod} language={language} />
+                  <CustomSelect
+                    className="punch-period-select"
+                    value={payrollTechFilter.length ? "selected" : "all"}
+                    onChange={(value) => setPayrollTechFilter(value === "all" ? [] : [value])}
+                    ariaLabel="Technician filter"
+                    options={[
+                      { value: "all", label: "All technicians" },
+                      ...userAccounts.filter((account) => account.active && account.isTechnician).map((account) => ({ value: account.name, label: account.name })),
+                    ]}
+                  />
+                  <button type="button" className="outline-button" onClick={() => setShowPayrollCost((current) => !current)}>{showPayrollCost ? (language === "fr" ? "Masquer les coûts" : "Hide cost") : (language === "fr" ? "Afficher les coûts" : "Show cost")}</button>
+                </div>
+              </div>
+              {payrollLoading ? <p className="empty-history">Loading payroll…</p> : (() => {
+                const selectedRows = payrollRows.length ? payrollRows : [];
+                if (!selectedRows.length) return <p className="empty-history">No time entries for this period</p>;
+                const idleMinutesByDay = unaccountedIdleMinutes(timeEntries, selectedRows);
+                const metricsByDay = new Map(selectedRows.map((row: any) => [`${row.user_id}:${row.work_date}`, dailyMetrics(row, lunchProposals, timeEntries)]));
+                const hourlyRateFor = (userId: string) => Number(userAccounts.find((account) => account.name === userId)?.hourlyRate ?? 0);
+                const formatCost = (value: number) => showPayrollCost ? `$${value.toFixed(2)}` : "•••";
+                const rowsByTech = new Map<string, Array<Record<string, any>>>();
+                for (const row of selectedRows) {
+                  const tech = String(row.user_name ?? row.user_id ?? "Unknown");
+                  const current = rowsByTech.get(tech) ?? [];
+                  current.push(row);
+                  rowsByTech.set(tech, current);
+                }
+                const grand = { rawHours: 0, breakMinutes: 0, lostTimeMinutes: 0, netPayableHours: 0, billableHours: 0, cost: 0 };
+                const techTotals = Array.from(rowsByTech.entries()).map(([tech, entries]) => {
+                  const total = entries.reduce((acc, row) => {
+                    const metrics = metricsByDay.get(`${row.user_id}:${row.work_date}`) ?? dailyMetrics(row, lunchProposals, timeEntries);
+                    acc.rawHours += metrics.rawHours;
+                    acc.breakMinutes += metrics.breakMinutes;
+                    acc.lostTimeMinutes += metrics.lostTimeMinutes;
+                    acc.netPayableHours += metrics.netPayableHours;
+                    acc.billableHours += metrics.billableHours;
+                    acc.cost += metrics.billableHours * hourlyRateFor(row.user_id);
+                    return acc;
+                  }, { rawHours: 0, breakMinutes: 0, lostTimeMinutes: 0, netPayableHours: 0, billableHours: 0, cost: 0 });
+                  Object.entries(total).forEach(([key, value]) => { (grand as any)[key] += value; });
+                  return { tech, total };
+                });
+                return (
+                  <div className="table-wrap admin-summary-table">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Technician</th>
+                          <th>Day</th>
+                          <th>Start</th>
+                          <th>End</th>
+                          <th>Raw</th>
+                          <th>Break</th>
+                          <th>Lost</th>
+                          <th>Net</th>
+                          <th>Billable</th>
+                          <th>Cost</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedRows.map((row: any) => (
+                          <tr key={`${row.user_id}-${row.work_date}`}>
+                            <td>{row.user_name ?? row.user_id}</td>
+                            <td>{row.work_date}{lunchProposals.some((proposal) => proposal.userId === row.user_id && proposal.workDate === row.work_date) && <span title="Auto-detected lunch" style={{ marginLeft: 6, color: "#2563eb" }}>🍽</span>}{(idleMinutesByDay.get(`${row.user_id}:${row.work_date}`) ?? 0) > 0 && <button type="button" title="Classify unclassified idle time" onClick={() => openDayClassification(row.user_id, row.work_date)} style={{ marginLeft: 6, border: 0, background: "transparent", color: "#b45309", cursor: "pointer" }}>⚠</button>}</td>
+                            <td>{formatTorontoTime(row.day_start)}</td>
+                            <td>{formatTorontoTime(row.day_end)}</td>
+                            <td>{(metricsByDay.get(`${row.user_id}:${row.work_date}`) ?? dailyMetrics(row, lunchProposals, timeEntries)).rawHours.toFixed(2)} h</td>
+                            <td>{(metricsByDay.get(`${row.user_id}:${row.work_date}`) ?? dailyMetrics(row, lunchProposals, timeEntries)).breakMinutes.toFixed(0)} min</td>
+                            <td>{(metricsByDay.get(`${row.user_id}:${row.work_date}`) ?? dailyMetrics(row, lunchProposals, timeEntries)).lostTimeMinutes.toFixed(0)} min</td>
+                            <td>{(metricsByDay.get(`${row.user_id}:${row.work_date}`) ?? dailyMetrics(row, lunchProposals, timeEntries)).netPayableHours.toFixed(2)} h</td>
+                            <td>{(metricsByDay.get(`${row.user_id}:${row.work_date}`) ?? dailyMetrics(row, lunchProposals, timeEntries)).billableHours.toFixed(2)} h</td>
+                            <td>{formatCost((metricsByDay.get(`${row.user_id}:${row.work_date}`) ?? dailyMetrics(row, lunchProposals, timeEntries)).billableHours * hourlyRateFor(row.user_id))}</td>
+                          </tr>
+                        ))}
+                        {techTotals.map(({ tech, total }) => (
+                          <tr key={`subtotal-${tech}`} style={{ fontWeight: 700, background: "rgba(15, 23, 42, 0.03)" }}>
+                            <td>{tech}</td>
+                            <td>Subtotal</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>{total.rawHours.toFixed(2)} h</td>
+                            <td>{total.breakMinutes.toFixed(0)} min</td>
+                            <td>{total.lostTimeMinutes.toFixed(0)} min</td>
+                            <td>{total.netPayableHours.toFixed(2)} h</td>
+                            <td>{total.billableHours.toFixed(2)} h</td>
+                            <td>{formatCost(total.cost)}</td>
+                          </tr>
+                        ))}
+                        <tr style={{ fontWeight: 800, background: "rgba(239, 68, 68, 0.08)" }}>
+                          <td colSpan={4}>Grand total</td>
+                          <td>{grand.rawHours.toFixed(2)} h</td>
+                          <td>{grand.breakMinutes.toFixed(0)} min</td>
+                          <td>{grand.lostTimeMinutes.toFixed(0)} min</td>
+                          <td>{grand.netPayableHours.toFixed(2)} h</td>
+                          <td>{grand.billableHours.toFixed(2)} h</td>
+                          <td>{formatCost(grand.cost)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
+            </section>
+          )}
+          {section === "profitability" && isAdmin && (
+            <section className="section-card full-card">
+              <div className="toolbar">
+                <div>
+                  <p className="card-kicker">{language === "fr" ? "Rentabilité" : "Profitability"}</p>
+                  <h2>Profitability</h2>
+                </div>
+                <div className="punch-history-controls-row">
+                  <PayrollPeriodSelect value={payrollPeriodPreset} onChange={changePayrollPeriod} language={language} />
+                  <CustomSelect
+                    className="punch-period-select"
+                    value={payrollTechFilter.length ? "selected" : "all"}
+                    onChange={(value) => setPayrollTechFilter(value === "all" ? [] : [value])}
+                    ariaLabel="Technician filter"
+                    options={[
+                      { value: "all", label: "All technicians" },
+                      ...userAccounts.filter((account) => account.active && account.isTechnician).map((account) => ({ value: account.name, label: account.name })),
+                    ]}
+                  />
+                  <button type="button" className="outline-button" onClick={() => setShowPayrollCost((current) => !current)}>{showPayrollCost ? (language === "fr" ? "Masquer les coûts" : "Hide cost") : (language === "fr" ? "Afficher les coûts" : "Show cost")}</button>
+                </div>
+              </div>
+              {profitabilityLoading ? <p className="empty-history">{language === "fr" ? "Chargement des données de rentabilité…" : "Loading profitability data…"}</p> : (() => {
+                const rateByUser = new Map(profitabilityRows.map((entry: any) => [String(entry.user_id), Number(entry.hourly_rate ?? 0)]));
+                const formatCost = (value: number) => showPayrollCost ? `$${value.toFixed(2)}` : "•••";
+                const entries = timeEntries.filter((entry) => entry.status === "completed" && torontoDateKey(entry.clockIn) >= payrollPeriodStart && torontoDateKey(entry.clockIn) <= payrollPeriodEnd && Number(entry.lostTimeMinutes ?? 0) > 0).map((entry) => ({ ...entry, user_id: entry.userId, user_name: entry.userName, lost_time_minutes: entry.lostTimeMinutes ?? 0, lost_time_reason: entry.lostTimeReason, hourly_rate: userAccounts.find((account) => account.name === entry.userId)?.hourlyRate ?? rateByUser.get(entry.userId) ?? 0 }));
+                const totalLostHours = entries.reduce((sum: number, entry: any) => sum + Number(entry.lost_time_minutes ?? 0) / 60, 0);
+                const estimatedCost = entries.reduce((sum: number, entry: any) => sum + ((Number(entry.lost_time_minutes ?? 0) / 60) * Number(entry.hourly_rate ?? 0)), 0);
+                const profitabilityMetrics = profitabilitySummaryRows.map((row: any) => dailyMetrics(row, lunchProposals, timeEntries));
+                const totalRawHours = profitabilityMetrics.reduce((sum, metrics) => sum + metrics.rawHours, 0);
+                const totalBillableHours = profitabilityMetrics.reduce((sum, metrics) => sum + metrics.billableHours, 0);
+                const utilizationRate = totalRawHours > 0 ? totalBillableHours / totalRawHours : 0;
+                const idleSummaryRows = profitabilitySummaryRows.length ? profitabilitySummaryRows : payrollRows;
+                const unclassifiedIdleCost = idleSummaryRows.reduce((sum: number, row: any) => {
+                  const idleMinutes = unaccountedIdleMinutes(timeEntries, [row]).get(`${row.user_id}:${row.work_date}`) ?? 0;
+                  return sum + (idleMinutes / 60) * (rateByUser.get(String(row.user_id)) ?? Number(userAccounts.find((account) => account.name === row.user_id)?.hourlyRate ?? 0));
+                }, 0);
+                const byReason = Object.entries(entries.reduce((acc: Record<string, { hours: number; cost: number }>, entry: any) => {
+                  const reason = String(entry.lost_time_reason || "Unspecified");
+                  const hours = Number(entry.lost_time_minutes ?? 0) / 60;
+                  const cost = hours * Number(entry.hourly_rate ?? 0);
+                  acc[reason] = acc[reason] ? { hours: acc[reason].hours + hours, cost: acc[reason].cost + cost } : { hours, cost };
+                  return acc;
+                }, {})).sort(([, a], [, b]) => b.hours - a.hours);
+                const byTech = Object.entries(entries.reduce((acc: Record<string, { hours: number; cost: number }>, entry: any) => {
+                  const tech = String(entry.user_name ?? entry.user_id ?? "Unknown");
+                  const hours = Number(entry.lost_time_minutes ?? 0) / 60;
+                  const cost = hours * Number(entry.hourly_rate ?? 0);
+                  acc[tech] = acc[tech] ? { hours: acc[tech].hours + hours, cost: acc[tech].cost + cost } : { hours, cost };
+                  return acc;
+                }, {})).sort(([, a], [, b]) => b.hours - a.hours);
+                return (
+                  <>
+                    <div className="metrics-grid">
+                      <div className="metric-card"><div className="metric-top"><div><p className="eyebrow">Lost time hours</p><p className="metric-number">{totalLostHours.toFixed(2)} h</p></div><span className="metric-icon metric-red !">!</span></div><p className="metric-detail">Across the selected range</p></div>
+                      <div className="metric-card"><div className="metric-top"><div><p className="eyebrow">Estimated cost</p><p className="metric-number">{formatCost(estimatedCost + unclassifiedIdleCost)}</p></div><span className="metric-icon metric-blue $">$</span></div><p className="metric-detail">{estimatedCost + unclassifiedIdleCost > 0 ? "Lost time + unclassified idle" : "Set hourly rates to estimate cost"}</p></div>
+                      <div className="metric-card"><div className="metric-top"><div><p className="eyebrow">Utilization</p><p className="metric-number">{(utilizationRate * 100).toFixed(1)}%</p></div><span className="metric-icon metric-green ↗">↗</span></div><p className="metric-detail">Billable / raw hours</p></div>
+                    </div>
+                      <div className="section-card" style={{ marginTop: 16 }}>
+                      <div className="detail-section-heading"><h3>Daily idle review</h3></div>
+                      <div className="table-wrap"><table><thead><tr><th>Technician</th><th>Day</th><th>Idle</th><th>Status</th></tr></thead><tbody>{idleSummaryRows.map((row: any) => { const idle = unaccountedIdleMinutes(timeEntries, [row]).get(`${row.user_id}:${row.work_date}`) ?? 0; const lunch = lunchProposals.find((proposal) => proposal.userId === row.user_id && proposal.workDate === row.work_date); return <tr key={`idle-${row.user_id}-${row.work_date}`}><td>{row.user_name ?? row.user_id}</td><td>{row.work_date}</td><td>{idle} min</td><td>{lunch && <span style={{ color: "#2563eb", marginRight: 8 }}>Auto-detected lunch ({lunch.minutes} min)</span>}{idle > 0 && <button type="button" className="outline-button" onClick={() => openDayClassification(row.user_id, row.work_date)}>⚠ Classify</button>}</td></tr>; })}</tbody></table></div>
+                    </div>
+                    <div className="bottom-grid">
+                      <div className="section-card">
+                        <div className="detail-section-heading"><h3>By lost-time reason</h3></div>
+                        <div className="table-wrap profitability-table">
+                          <table>
+                            <thead><tr><th>Reason</th><th>Hours</th><th>Cost</th></tr></thead>
+                            <tbody>
+                              {byReason.map(([reason, value]) => (
+                                <tr key={reason}><td>{reason}</td><td>{value.hours.toFixed(2)} h</td><td>{formatCost(value.cost)}</td></tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                      <div className="section-card">
+                        <div className="detail-section-heading"><h3>By technician</h3></div>
+                        <div className="table-wrap profitability-table">
+                          <table>
+                            <thead><tr><th>Technician</th><th>Hours</th><th>Cost</th></tr></thead>
+                            <tbody>
+                              {byTech.map(([tech, value]) => (
+                                <tr key={tech}><td>{tech}</td><td>{value.hours.toFixed(2)} h</td><td>{formatCost(value.cost)}</td></tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
             </section>
           )}
           {section === "clients" && (
@@ -1984,6 +2721,7 @@ export default function Home() {
                     <div className="user-avatar">{account.name.slice(0, 2).toUpperCase()}</div>
                     <div className="user-primary"><b>{account.name}</b><span>{account.role === "Admin" ? t("admin") : t("technician")}</span></div>
                     <span className={`user-status ${account.active ? "user-active" : "user-disabled"}`}>{account.active ? t("active") : t("disabled")}</span>
+                    <label className="user-rate-field">Hourly rate<input type="number" min="0" step="0.01" value={account.hourlyRate ?? ""} onChange={(event) => { const hourlyRate = event.target.value === "" ? null : Number(event.target.value); const nextUsers = userAccounts.map((candidate) => candidate.id === account.id ? { ...candidate, hourlyRate } : candidate); setUserAccounts(nextUsers); }} aria-label={`Hourly rate for ${account.name}`} /><button type="button" className="outline-button user-rate-save" onClick={() => { const nextUsers = userAccounts.map((candidate) => candidate.id === account.id ? { ...candidate, hourlyRate: account.hourlyRate ?? null } : candidate); void saveUsers(nextUsers).catch((error: Error) => reportActionError(`Hourly rate save failed: ${error.message}`)); }}>Save</button></label>
                     <label className="tech-list-toggle"><input type="checkbox" checked={account.isTechnician} onChange={() => toggleTechnician(account.id)} /> {t("technicianList")}</label>
                     {account.name !== "Marc" && account.name !== activeUser && <button className="outline-button" onClick={() => toggleAdminRole(account.id)}>{account.role === "Admin" ? t("technician") : t("admin")}</button>}
                     <button className="outline-button" onClick={() => setPasswordTargetId(passwordTargetId === account.id ? null : account.id)}>{t("adminChangePassword")}</button>
@@ -2156,7 +2894,7 @@ export default function Home() {
                   </div>
                   <button className={`outline-button ${pmDueOnly ? "filter-active-button" : ""}`} onClick={() => setPmDueOnly((current) => !current)}>{pmDueOnly ? t("pmDueOnly") : t("filters")}</button>
                 </div>
-                <div className="unit-list">
+                <div className="unit-list card-grid">
                   {filteredUnits.map((unit) => (
                     <div
                       className="unit-row"
@@ -2334,7 +3072,7 @@ export default function Home() {
                 </div>
                 <div className="detail-section detail-section-card work-order-time-section">
                   <div className="detail-section-heading"><h3>{t("punchHistory")}</h3><span>{timeEntries.filter((entry) => entry.workOrderId === activeJob.id).length} {t("entries")}</span></div>
-                  <div className="work-order-time-list">{timeEntries.filter((entry) => entry.workOrderId === activeJob.id).map((entry) => <div className="work-order-time-row" key={entry.id}><strong>{entry.userName}</strong><span>{new Date(entry.clockIn).toLocaleString()}</span><span>{entry.clockOut ? new Date(entry.clockOut).toLocaleString() : t("activePunch")}</span><b>{entry.totalHours == null ? t("activePunch") : `${entry.totalHours.toFixed(2)} h`}</b></div>)}{timeEntries.filter((entry) => entry.workOrderId === activeJob.id).length === 0 && <small className="empty-history">{t("noPunches")}</small>}</div>
+                  <div className="work-order-time-list">{timeEntries.filter((entry) => entry.workOrderId === activeJob.id).map((entry) => <div className="work-order-time-row" key={entry.id}><strong>{entry.userName}</strong><span>{formatTorontoTime(entry.clockIn)}</span><span>{entry.clockOut ? formatTorontoTime(entry.clockOut) : t("activePunch")}</span><b>{entry.totalHours == null ? t("activePunch") : `${entry.totalHours.toFixed(2)} h`}</b></div>)}{timeEntries.filter((entry) => entry.workOrderId === activeJob.id).length === 0 && <small className="empty-history">{t("noPunches")}</small>}</div>
                 </div>
                 <div className="detail-section detail-section-card">
                   <div className="detail-section-heading">
@@ -2354,7 +3092,7 @@ export default function Home() {
                         />
                         <small>
                           {note.author} ·{" "}
-                          {new Date(note.createdAt).toLocaleString()}
+                          {formatTorontoTime(note.createdAt)}
                         </small>
                         {canManageNote(note) && <button
                           className="entry-delete"
@@ -2520,6 +3258,11 @@ export default function Home() {
               </div>
             </div>
           )}
+          {classifyingDay && (() => {
+            const summary = [...payrollRows, ...profitabilitySummaryRows].find((row) => row.user_id === classifyingDay.userId && row.work_date === classifyingDay.workDate);
+            const remaining = summary ? unaccountedIdleMinutes(timeEntries, [summary]).get(`${classifyingDay.userId}:${classifyingDay.workDate}`) ?? 0 : 0;
+            return <div className="modal-backdrop" role="presentation"><form className="modal-card" onSubmit={(event) => { event.preventDefault(); void saveDayClassification(); }}><div className="modal-header"><div><p className="card-kicker">Admin classification</p><h2>{classifyingDay.userId} · {classifyingDay.workDate}</h2></div></div><p>{remaining} min unclassified idle time remaining.</p><div className="modal-fields"><label>Break minutes<input type="number" min="0" max={remaining} value={classificationBreakMinutes} onChange={(event) => setClassificationBreakMinutes(event.target.value)} /></label><label>Lost-time minutes<input type="number" min="0" max={remaining} value={classificationLostMinutes} onChange={(event) => setClassificationLostMinutes(event.target.value)} /></label><label>Lost-time reason<select value={classificationReason} onChange={(event) => setClassificationReason(event.target.value)}><option>Parts wait</option><option>Traffic</option><option>Admin</option><option>Equipment issue</option><option>Other</option></select></label></div><div className="modal-actions"><button type="button" className="outline-button" onClick={() => setClassifyingDay(null)}>Cancel</button><button type="submit" className="primary-button">Save classification</button></div></form></div>;
+          })()}
           {completionPrompt && (
             <div className="modal-backdrop" role="presentation">
               <form className="modal-card completion-meter-modal" onSubmit={(event) => { event.preventDefault(); void completeJobWithMeter(); }}>
@@ -2711,6 +3454,7 @@ export default function Home() {
                     </>
                   )}
                 </div>
+                {modal === "unit" && editingUnitId && <div className="unit-notes-section"><div className="detail-section-heading"><h3>Service notes</h3><span>{(unitNotes[editingUnitId] ?? []).length}</span></div><div className="unit-notes-list">{(unitNotes[editingUnitId] ?? []).map((note) => <div className="unit-note note-item" key={note.id}>{isAdmin ? <input value={note.text} onChange={(event) => updateUnitNoteForKey(editingUnitId, note.id, event.target.value)} onBlur={(event) => void commitUnitNoteEdit(editingUnitId, note.id, event.target.value)} /> : <p>{note.text}</p>}<small>{note.author} · {formatTorontoTime(note.createdAt)}</small>{isAdmin && <button type="button" className="entry-delete" onClick={() => void deleteUnitNoteForKey(editingUnitId, note.id)}>{t("delete")}</button>}</div>)}</div><textarea value={unitNoteText} onChange={(event) => setUnitNoteText(event.target.value)} placeholder="Add a service remark" aria-label="Add a service remark" /><button type="button" className="outline-button" onClick={() => void saveUnitNoteForKey(editingUnitId)}>Save note</button></div>}
                 <div className="modal-actions">
                   {modal === "unit" && editingUnitId && (
                     <button

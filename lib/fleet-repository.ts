@@ -6,6 +6,7 @@ export type CloudUnit = {
   due: string; overdue: boolean; usage: string; currentMeter?: number | null; lastPmMeter?: number | null; pmInterval?: number; meterUnit?: "KM" | "HRS";
   updatedAt?: string;
 };
+export type UnitNote = { id: string; text: string; author: string; createdAt: string };
 export type CloudJob = {
   id: string; unit: string; client: string; tech: string;
   priority: "High" | "Normal" | "Low";
@@ -13,8 +14,51 @@ export type CloudJob = {
   issue: string; updated: string; usage: string; meterReading?: number | null; notes?: unknown[]; lineItems?: unknown[];
   updatedAt?: string;
 };
-export type CloudUser = { id: string; name: string; role: "Admin" | "Technician"; password: string; active: boolean; isTechnician: boolean };
-export type CloudTimeEntry = { id: string; userId: string; userName: string; workOrderId: string | null; clockIn: string; clockOut: string | null; totalHours: number | null; status: "active" | "completed" };
+export type CloudUser = { id: string; name: string; role: "Admin" | "Technician"; password: string; active: boolean; isTechnician: boolean; hourlyRate?: number | null };
+export type CloudTimeEntry = {
+  id: string;
+  userId: string;
+  userName: string;
+  workOrderId: string | null;
+  clockIn: string;
+  clockOut: string | null;
+  totalHours: number | null;
+  status: "active" | "completed";
+  breakMinutes?: number | null;
+  breakStartedAt?: string | null;
+  lostTimeMinutes?: number | null;
+  lostTimeReason?: string | null;
+};
+export type DailyTimesheetSummaryRow = {
+  userId: string;
+  userName: string;
+  workDate: string;
+  dayStart: string | null;
+  dayEnd: string | null;
+  hasOpenEntry: boolean;
+  rawHours: number | null;
+  breakMinutes: number | null;
+  lostTimeMinutes: number | null;
+  netPayableHours: number | null;
+  billableHours: number | null;
+  hourlyRate: number | null;
+};
+export type WeeklyTimesheetSummaryRow = {
+  userId: string;
+  userName: string;
+  weekStart: string;
+  weekEnd: string;
+  weeklyNetHours: number | null;
+  weeklyBillableHours: number | null;
+  hourlyRate: number | null;
+  weeklyGrossPay: number | null;
+};
+export type PayrollPeriodLock = {
+  periodStart: string;
+  periodEnd: string;
+  lockedBy: string;
+  lockedAt: string;
+};
 export type RealtimeChange<T> = { eventType: "INSERT" | "UPDATE" | "DELETE"; record: T | null; oldRecord: Partial<T> | null };
 
 function finiteNumber(value: unknown): number | null {
@@ -37,10 +81,62 @@ function mapJob(row: Record<string, unknown>): CloudJob {
   return { id: String(row.id ?? ""), unit: String(row.unit ?? ""), client: String(row.client ?? ""), tech: String(row.tech ?? "Unassigned"), priority: row.priority as CloudJob["priority"], status: row.status as CloudJob["status"], issue: String(row.issue ?? ""), updated: String(row.updated ?? ""), usage: String(row.usage ?? "Not recorded"), meterReading: finiteNumber(row.meter_reading), notes: Array.isArray(row.notes) ? row.notes : [], lineItems: Array.isArray(row.line_items) ? row.line_items : [], updatedAt: typeof row.updated_at === "string" ? row.updated_at : undefined };
 }
 function mapUser(row: Record<string, unknown>): CloudUser {
-  return { id: String(row.id), name: String(row.name), role: row.role as CloudUser["role"], password: String(row.password), active: Boolean(row.active), isTechnician: Boolean(row.is_technician) };
+  return { id: String(row.id), name: String(row.name), role: row.role as CloudUser["role"], password: String(row.password), active: Boolean(row.active), isTechnician: Boolean(row.is_technician), hourlyRate: finiteNumber(row.hourly_rate) };
 }
 function mapTimeEntry(row: Record<string, unknown>): CloudTimeEntry {
-  return { id: String(row.id ?? ""), userId: String(row.user_id ?? ""), userName: String(row.user_name ?? ""), workOrderId: row.work_order_id ? String(row.work_order_id) : null, clockIn: String(row.clock_in ?? ""), clockOut: row.clock_out ? String(row.clock_out) : null, totalHours: finiteNumber(row.total_hours), status: row.status as CloudTimeEntry["status"] };
+  return {
+    id: String(row.id ?? ""),
+    userId: String(row.user_id ?? ""),
+    userName: String(row.user_name ?? ""),
+    workOrderId: row.work_order_id ? String(row.work_order_id) : null,
+    clockIn: String(row.clock_in ?? ""),
+    clockOut: row.clock_out ? String(row.clock_out) : null,
+    totalHours: finiteNumber(row.total_hours),
+    status: row.status as CloudTimeEntry["status"],
+    breakMinutes: finiteNumber(row.break_minutes),
+    breakStartedAt: typeof row.break_started_at === "string" ? row.break_started_at : null,
+    lostTimeMinutes: finiteNumber(row.lost_time_minutes),
+    lostTimeReason: typeof row.lost_time_reason === "string" ? row.lost_time_reason : null,
+  };
+}
+
+function mapDailyTimesheetSummary(row: Record<string, unknown>): DailyTimesheetSummaryRow {
+  return {
+    userId: String(row.user_id ?? ""),
+    userName: String(row.user_name ?? ""),
+    workDate: String(row.work_date ?? ""),
+    dayStart: typeof row.day_start === "string" ? row.day_start : null,
+    dayEnd: typeof row.day_end === "string" ? row.day_end : null,
+    hasOpenEntry: Boolean(row.has_open_entry),
+    rawHours: finiteNumber(row.raw_hours),
+    breakMinutes: finiteNumber(row.break_minutes),
+    lostTimeMinutes: finiteNumber(row.lost_time_minutes),
+    netPayableHours: finiteNumber(row.net_payable_hours),
+    billableHours: finiteNumber(row.billable_hours),
+    hourlyRate: finiteNumber(row.hourly_rate),
+  };
+}
+
+function mapWeeklyTimesheetSummary(row: Record<string, unknown>): WeeklyTimesheetSummaryRow {
+  return {
+    userId: String(row.user_id ?? ""),
+    userName: String(row.user_name ?? ""),
+    weekStart: String(row.week_start ?? ""),
+    weekEnd: String(row.week_end ?? ""),
+    weeklyNetHours: finiteNumber(row.weekly_net_hours),
+    weeklyBillableHours: finiteNumber(row.weekly_billable_hours),
+    hourlyRate: finiteNumber(row.hourly_rate),
+    weeklyGrossPay: finiteNumber(row.weekly_gross_pay),
+  };
+}
+
+function mapPayrollPeriodLock(row: Record<string, unknown>): PayrollPeriodLock {
+  return {
+    periodStart: String(row.period_start ?? ""),
+    periodEnd: String(row.period_end ?? ""),
+    lockedBy: String(row.locked_by ?? ""),
+    lockedAt: String(row.locked_at ?? ""),
+  };
 }
 
 export async function loadFleetData() {
@@ -115,7 +211,7 @@ export async function loadUsers() {
 
 export async function saveUsers(users: CloudUser[]) {
   if (!supabase) return;
-  const { error } = await supabase.from("user_accounts").upsert(users.map((user) => ({ id: user.id, name: user.name, role: user.role, password: user.password, active: user.active, is_technician: user.isTechnician, updated_at: new Date().toISOString() })), { onConflict: "id" });
+  const { error } = await supabase.from("user_accounts").upsert(users.map((user) => ({ id: user.id, name: user.name, role: user.role, password: user.password, active: user.active, is_technician: user.isTechnician, hourly_rate: user.hourlyRate ?? null, updated_at: new Date().toISOString() })), { onConflict: "id" });
   if (error?.code === "PGRST205") return;
   if (error) throw error;
 }
@@ -139,7 +235,17 @@ export async function loadTimeEntries(userId?: string) {
 
 export async function createTimeEntry(entry: Omit<CloudTimeEntry, "id" | "clockOut" | "totalHours" | "status">) {
   if (!supabase) return null;
-  const { data, error } = await supabase.from("time_entries").insert({ user_id: entry.userId, user_name: entry.userName, work_order_id: entry.workOrderId, clock_in: entry.clockIn, status: "active" }).select().single();
+  const { data, error } = await supabase.from("time_entries").insert({
+    user_id: entry.userId,
+    user_name: entry.userName,
+    work_order_id: entry.workOrderId,
+    clock_in: entry.clockIn,
+    status: "active",
+    break_minutes: entry.breakMinutes ?? 0,
+    break_started_at: entry.breakStartedAt ?? null,
+    lost_time_minutes: entry.lostTimeMinutes ?? 0,
+    lost_time_reason: entry.lostTimeReason ?? null,
+  }).select().single();
   if (error?.code === "PGRST205") return null;
   if (error) throw error;
   return mapTimeEntry(data as Record<string, unknown>);
@@ -162,7 +268,7 @@ export async function createManualTimeEntry(entry: { userId: string; userName: s
 
 export async function updateTimeEntry(entry: CloudTimeEntry) {
   if (!supabase) return;
-  const { error } = await supabase.from("time_entries").update({
+  const { data, error } = await supabase.from("time_entries").update({
     user_id: entry.userId,
     user_name: entry.userName,
     work_order_id: entry.workOrderId,
@@ -170,9 +276,14 @@ export async function updateTimeEntry(entry: CloudTimeEntry) {
     clock_out: entry.clockOut,
     total_hours: entry.totalHours,
     status: entry.status,
-  }).eq("id", entry.id);
+    break_minutes: entry.breakMinutes ?? 0,
+    break_started_at: entry.breakStartedAt ?? null,
+    lost_time_minutes: entry.lostTimeMinutes ?? 0,
+    lost_time_reason: entry.lostTimeReason ?? null,
+  }).eq("id", entry.id).select("id");
   if (error?.code === "PGRST205") throw new Error("The time_entries table is not installed. Run supabase/schema.sql first.");
   if (error) throw error;
+  if (!data?.length) throw new Error("The time entry was not found or could not be updated.");
 }
 
 export async function removeTimeEntry(id: string) {
@@ -194,10 +305,79 @@ export async function removeJob(id: string) {
   if (error) throw error;
 }
 
-export async function writeActivityLog(actor: string, action: string, entityType: "unit" | "work_order", entityId: string, details: Record<string, unknown> = {}) {
-  if (!supabase) return;
-  const { error } = await supabase.from("activity_logs").insert({ actor, action, entity_type: entityType, entity_id: entityId, details });
+export async function writeActivityLog(actor: string, action: string, entityType: string, entityId: string, details: Record<string, unknown> = {}) {
+  if (!supabase) return null;
+  const { data, error } = await supabase.from("activity_logs").insert({ actor, action, entity_type: entityType, entity_id: entityId, details }).select("id").single();
   if (error) throw error;
+  return data ? String(data.id) : null;
+}
+
+// Unit notes have no dedicated table; they're reconstructed by replaying add/update/delete
+// events stored in activity_logs (details.noteId links updates/deletes back to the add event's id).
+export async function loadUnitNotes() {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("activity_logs")
+    .select("id,actor,entity_id,action,details,created_at")
+    .eq("entity_type", "unit")
+    .in("action", ["unit_note_added", "unit_note_updated", "unit_note_deleted"])
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  const notesById = new Map<string, UnitNote & { unitId: string }>();
+  for (const row of data ?? []) {
+    const unitId = String(row.entity_id);
+    if (row.action === "unit_note_added") {
+      notesById.set(String(row.id), { id: String(row.id), unitId, text: String(row.details?.text ?? ""), author: String(row.actor ?? "Unknown"), createdAt: String(row.created_at ?? new Date().toISOString()) });
+    } else if (row.action === "unit_note_updated") {
+      const noteId = String(row.details?.noteId ?? "");
+      const existing = notesById.get(noteId);
+      if (existing) notesById.set(noteId, { ...existing, text: String(row.details?.text ?? existing.text) });
+    } else if (row.action === "unit_note_deleted") {
+      notesById.delete(String(row.details?.noteId ?? ""));
+    }
+  }
+  return Array.from(notesById.values());
+}
+
+export async function loadDailyTimesheetSummary(userId?: string) {
+  if (!supabase) return null;
+  let query = supabase.from("daily_timesheet_summary").select("*").order("work_date", { ascending: false });
+  if (userId) query = query.eq("user_id", userId);
+  const { data, error } = await query;
+  if (error?.code === "PGRST205") return null;
+  if (error) throw error;
+  return (data ?? []).map((row) => mapDailyTimesheetSummary(row as Record<string, unknown>));
+}
+
+export async function loadWeeklyTimesheetSummary(userId?: string) {
+  if (!supabase) return null;
+  let query = supabase.from("weekly_timesheet_summary").select("*").order("week_start", { ascending: false });
+  if (userId) query = query.eq("user_id", userId);
+  const { data, error } = await query;
+  if (error?.code === "PGRST205") return null;
+  if (error) throw error;
+  return (data ?? []).map((row) => mapWeeklyTimesheetSummary(row as Record<string, unknown>));
+}
+
+export async function loadPayrollLocks() {
+  if (!supabase) return null;
+  const { data, error } = await supabase.from("payroll_period_locks").select("*\n").order("period_start", { ascending: false });
+  if (error?.code === "PGRST205") return null;
+  if (error) throw error;
+  return (data ?? []).map((row) => mapPayrollPeriodLock(row as Record<string, unknown>));
+}
+
+export async function upsertPayrollLock(lock: { periodStart: string; periodEnd: string; lockedBy: string }) {
+  if (!supabase) return null;
+  const { data, error } = await supabase.from("payroll_period_locks").upsert({
+    period_start: lock.periodStart,
+    period_end: lock.periodEnd,
+    locked_by: lock.lockedBy,
+    locked_at: new Date().toISOString(),
+  }, { onConflict: "period_start,period_end" }).select().single();
+  if (error?.code === "PGRST205") return null;
+  if (error) throw error;
+  return mapPayrollPeriodLock(data as Record<string, unknown>);
 }
 
 export function subscribeToFleet(onUnits: (change: RealtimeChange<CloudUnit>) => void, onJobs: (change: RealtimeChange<CloudJob>) => void, onError?: (message: string) => void, onUsers?: (change: RealtimeChange<CloudUser>) => void, onTimeEntries?: (change: RealtimeChange<CloudTimeEntry>) => void, timeEntryUserId?: string) {
