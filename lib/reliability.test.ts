@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateBillableHours, calculateGrossPay, calculateLostTimeCost, calculateNetPayableHours, clearOfflineMutations, enqueueOfflineMutation, mergeRemoteRecords, readOfflineMutations, recordsEqual, remoteWins, resolvePmConfig, validateCompletion, withRetry, type StorageLike } from "./reliability";
+import { calculateBillableHours, calculateGrossPay, calculateLostTimeCost, calculateNetPayableHours, clearOfflineMutations, enqueueOfflineMutation, formatIdleElapsed, formatRelativeUpdateTime, getIdleSignals, mergeRemoteRecords, readOfflineMutations, recordsEqual, remoteWins, resolvePmConfig, validateCompletion, withRetry, type StorageLike } from "./reliability";
 
 const memoryStorage = (): StorageLike => {
   const values = new Map<string, string>();
@@ -9,6 +9,27 @@ const memoryStorage = (): StorageLike => {
     removeItem: (key) => values.delete(key),
   };
 };
+
+describe("activity update timestamps", () => {
+  const updatedAt = "2026-09-27T12:00:00Z";
+  const updated = Date.parse(updatedAt);
+
+  it("ages the same recorded update through seconds, minutes, hours, and days", () => {
+    expect(formatRelativeUpdateTime(updatedAt, updated + 5000, "en")).toBe("5 seconds ago");
+    expect(formatRelativeUpdateTime(updatedAt, updated + 60_000, "en")).toBe("1 minute ago");
+    expect(formatRelativeUpdateTime(updatedAt, updated + 7_200_000, "en")).toBe("2 hours ago");
+    expect(formatRelativeUpdateTime(updatedAt, updated + 86_400_000, "en")).toBe("1 day ago");
+    expect(formatRelativeUpdateTime(updatedAt, updated + 7_200_000, "fr")).toBe("il y a 2 heures");
+  });
+
+  it("does not turn missing, invalid, or future timestamps into just now", () => {
+    expect(formatRelativeUpdateTime(undefined, updated, "en")).toBeNull();
+    expect(formatRelativeUpdateTime("Just now", updated, "en")).toBeNull();
+    expect(formatRelativeUpdateTime(updatedAt, NaN, "en")).toBeNull();
+    expect(formatRelativeUpdateTime(updatedAt, 0, "en")).toBeNull();
+    expect(formatRelativeUpdateTime(updatedAt, updated - 60_000, "en")).toBe("in 1 minute");
+  });
+});
 
 describe("withRetry", () => {
   it("retries transient failures with exponential delays", async () => {
@@ -129,5 +150,43 @@ describe("offline mutation queue", () => {
     const storage = memoryStorage();
     storage.setItem("rpm-test-queue", "not-json");
     expect(readOfflineMutations(storage, "rpm-test-queue")).toEqual([]);
+  });
+});
+
+describe("idle work-order telemetry", () => {
+  const now = Date.parse("2026-09-27T12:00:00Z");
+  const job = { id: "WO-1", unit: "TR-1", client: "Fleet", tech: "Marc", status: "Waiting on Parts", updatedAt: "2026-09-27T08:00:00Z" };
+
+  it("flags blocked and unassigned active work without changing payroll data", () => {
+    const signals = getIdleSignals([
+      job,
+      { ...job, id: "WO-2", status: "Scheduled", tech: " Unassigned " },
+      { ...job, id: "WO-3", status: "Completed", tech: "Unassigned" },
+      { ...job, id: "WO-4", status: "In Progress" },
+    ], now);
+    expect(signals.map((signal) => signal.job.id)).toEqual(["WO-1", "WO-2"]);
+    expect(signals[0]).toMatchObject({ stale: true, critical: false, elapsedMs: 14_400_000, reason: "parts" });
+    expect(signals[1].unassigned).toBe(true);
+    expect(job.updatedAt).toBe("2026-09-27T08:00:00Z");
+  });
+
+  it("uses last-update age and respects threshold and escalation boundaries", () => {
+    expect(getIdleSignals([job], now, 5)[0].stale).toBe(false);
+    expect(getIdleSignals([job], now, 2)[0].critical).toBe(true);
+    expect(getIdleSignals([{ ...job, updatedAt: "2026-09-27T11:00:00Z" }], now)[0].stale).toBe(false);
+    expect(getIdleSignals([job], now, NaN)[0].stale).toBe(true);
+  });
+
+  it("never invents elapsed time for missing, invalid, or future timestamps", () => {
+    for (const updatedAt of [undefined, "invalid", "2026-09-28T12:00:00Z"]) {
+      expect(getIdleSignals([{ ...job, updatedAt }], now)[0]).toMatchObject({ elapsedMs: null, stale: false, critical: false });
+    }
+  });
+
+  it("formats live durations without wrapping hours at midnight", () => {
+    expect(formatIdleElapsed(90_061_000)).toBe("25:01:01");
+    expect(formatIdleElapsed(3_600_000)).toBe("01:00:00");
+    expect(formatIdleElapsed(0)).toBe("00:00:00");
+    expect(formatIdleElapsed(null)).toBe("--:--:--");
   });
 });

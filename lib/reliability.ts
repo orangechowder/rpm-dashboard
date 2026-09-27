@@ -10,6 +10,15 @@ export type VersionedRecord = {
   version?: number | null;
 };
 
+export function formatRelativeUpdateTime(updatedAt: string | null | undefined, now: number, language: "en" | "fr"): string | null {
+  const timestamp = updatedAt ? Date.parse(updatedAt) : NaN;
+  if (!Number.isFinite(timestamp) || !Number.isFinite(now) || now <= 0) return null;
+  const seconds = (timestamp - now) / 1000;
+  const magnitude = Math.abs(seconds);
+  const [divisor, unit]: [number, Intl.RelativeTimeFormatUnit] = magnitude >= 86400 ? [86400, "day"] : magnitude >= 3600 ? [3600, "hour"] : magnitude >= 60 ? [60, "minute"] : [1, "second"];
+  return new Intl.RelativeTimeFormat(language === "fr" ? "fr-CA" : "en-CA", { numeric: "always" }).format(Math.trunc(seconds / divisor), unit);
+}
+
 export type CompletionInput = {
   meterReading: unknown;
   unit: string;
@@ -33,6 +42,35 @@ export type StorageLike = {
   setItem: (key: string, value: string) => void;
   removeItem: (key: string) => void;
 };
+
+export type IdleWorkOrder = {
+  id: string;
+  unit: string;
+  client: string;
+  tech: string;
+  status: string;
+  updatedAt?: string;
+};
+
+export function getIdleSignals<T extends IdleWorkOrder>(jobs: readonly T[], now: number, thresholdHours = 4) {
+  const threshold = (Number.isFinite(thresholdHours) && thresholdHours > 0 ? thresholdHours : 4) * 3_600_000;
+  return jobs.filter((job) => job.status.trim() !== "Completed").flatMap((job) => {
+    const status = job.status.trim();
+    const unassigned = !job.tech.trim() || job.tech.trim().toLowerCase() === "unassigned";
+    const reason = status === "Waiting on Parts" ? "parts" : status === "Waiting on Estimates" ? "estimates" : unassigned ? "unassigned" : null;
+    if (!reason) return [];
+    const updated = job.updatedAt ? Date.parse(job.updatedAt) : NaN;
+    const elapsedMs = Number.isFinite(now) && Number.isFinite(updated) && updated <= now ? now - updated : null;
+    return [{ job, reason, unassigned, elapsedMs, stale: elapsedMs != null && elapsedMs >= threshold, critical: elapsedMs != null && elapsedMs >= threshold * 2 }];
+  }).sort((left, right) => (right.elapsedMs ?? -1) - (left.elapsedMs ?? -1));
+}
+
+export function formatIdleElapsed(elapsedMs: number | null): string {
+  if (elapsedMs == null || !Number.isFinite(elapsedMs) || elapsedMs < 0) return "--:--:--";
+  const seconds = Math.floor(elapsedMs / 1000);
+  return [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60]
+    .map((value) => String(value).padStart(2, "0")).join(":");
+}
 
 export type OfflineMutation<T> = {
   id: string;
