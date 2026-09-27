@@ -2880,7 +2880,42 @@ export default function Home() {
               </div>
               {filteredJobs.length === 0 && <div className="queue-empty"><Search size={24} aria-hidden="true" /><p>{language === "en" ? "No matching work orders" : "Aucun ordre de travail correspondant"}</p>{(jobQueueSearch || jobFilter !== "All") && <button className="outline-button" onClick={openJobsQueue}>{language === "en" ? "Clear filters" : "Effacer les filtres"}</button>}</div>}
               <div className="mobile-job-list">
-                {filteredJobs.map((job) => <article className="mobile-job-card" key={`mobile-${job.id}`} onClick={() => openJobDetails(job)}><div className="mobile-job-heading"><div><strong>{job.unit}</strong><span>{job.client}</span></div><span className="work-order-id">{job.id}</span></div><button type="button" className="mobile-job-description" onClick={(event) => { event.stopPropagation(); openJobDetails(job); }}>{job.issue}</button><div className="mobile-job-meta"><span><small>{t("technician")}</small>{job.tech}</span><span><small>{t("priority")}</small><b className={`mobile-job-priority priority-${job.priority.toLowerCase()}`}>{t(job.priority)}</b></span><span><small>{t("status")}</small><StatusPill status={job.status} language={language} /></span></div><small className="mobile-job-updated"><ActivityTimestamp updatedAt={job.updatedAt} language={language} compact /></small></article>)}
+                {filteredJobs.map((job) => (
+                  <button
+                    type="button"
+                    className="mobile-job-card"
+                    key={`mobile-${job.id}`}
+                    data-status={job.status}
+                    aria-label={`${t("workOrder")} ${job.unit}: ${job.issue}`}
+                    aria-haspopup="dialog"
+                    onClick={() => openJobDetails(job)}
+                  >
+                    <span className="mobile-job-heading">
+                      <strong>{job.unit}</strong>
+                      <span className="work-order-id">{job.id}</span>
+                    </span>
+                    <span className="mobile-job-client">{job.client}</span>
+                    <span className="mobile-job-description">{job.issue}</span>
+                    <span className="mobile-job-meta">
+                      <StatusPill status={job.status} language={language} />
+                      <span className="mobile-job-technician">
+                        <Wrench size={13} aria-hidden="true" />
+                        <span><span className="sr-only">{t("technician")}: </span>{job.tech}</span>
+                      </span>
+                    </span>
+                    <span className="mobile-job-trailing">
+                      <span className={`mobile-job-priority priority-${job.priority.toLowerCase()}`}>
+                        <span className="mobile-priority-dot" aria-hidden="true" />
+                        <span className="sr-only">{t("priority")}: </span>{t(job.priority)}
+                      </span>
+                      <span className="mobile-job-updated">
+                        <Clock3 size={12} aria-hidden="true" />
+                        <ActivityTimestamp updatedAt={job.updatedAt} language={language} compact />
+                      </span>
+                      <ArrowUpRight className="mobile-job-open" size={16} aria-hidden="true" />
+                    </span>
+                  </button>
+                ))}
               </div>
               <footer className="queue-footer"><span><span className="signal-dot" aria-hidden="true" />{jobFilter === "All" ? t("activeJobs") : t(jobFilter)}</span><span className="font-mono">{filteredJobs.length} / {jobData.length}</span></footer>
             </section>
@@ -2936,12 +2971,15 @@ export default function Home() {
                       key={unitKey(unit)}
                     >
                       <div className="unit-avatar">{unit.unit.slice(0, 3)}</div>
-                      <div className="unit-primary">
+                      <button
+                        type="button"
+                        className="unit-primary"
+                        aria-label={`${language === "fr" ? "Modifier l'unité" : "Edit unit"} ${unit.unit}`}
+                        onClick={() => openUnitEditor(unit)}
+                      >
                         <b>{unit.unit}</b>
-                        <span>
-                          {unit.type} · VIN {unit.vin}
-                        </span>
-                      </div>
+                        <span>{unit.type} · VIN {unit.vin}</span>
+                      </button>
                       <div>
                         <label>{t("assignedClientLabel")}</label>
                         <b>{unit.client}</b>
@@ -2955,7 +2993,8 @@ export default function Home() {
                         <b>{(() => { const summary = meterSummaryForUnit(unit); return summary.currentMeter == null ? unit.usage : `${summary.currentMeter} ${summary.meterUnit}`; })()}</b>
                       </div>
                       <div className="unit-meter-summary">{(() => { const summary = meterSummaryForUnit(unit); return summary.overdueBy != null && summary.overdueBy > 0 ? <small className="pm-remaining pm-remaining-due">{summary.overdueBy} {summary.meterUnit} {t("pmOverdueBy")}</small> : summary.remaining != null ? <small className="pm-remaining">{summary.remaining} {summary.meterUnit} {t("pmRemaining")}</small> : <small className="pm-remaining">-</small>; })()}</div>
-                      <div className="unit-due">
+                      <div className="unit-card-actions">
+                        <div className="unit-due">
                         <button
                           type="button"
                           className={`pm-toggle ${pmDueForUnit(unit) ? "pm-needed" : "pm-clear"}`}
@@ -2968,29 +3007,33 @@ export default function Home() {
                           <span>{pmDueForUnit(unit) ? t("pmNeeded") : t("pmClear")}</span>
                         </button>
                         <small>{unit.due}</small>
+                        </div>
+                        <button
+                          type="button"
+                          className="history-button"
+                          aria-label={`${t("history")} ${unit.unit}`}
+                          onPointerDown={(event) => { event.stopPropagation(); event.nativeEvent.stopImmediatePropagation(); }}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            event.nativeEvent.stopImmediatePropagation();
+                            openUnitHistory(unit);
+                          }}
+                        >
+                          {t("history")}
+                        </button>
+                        <button
+                          type="button"
+                          className="row-action"
+                          aria-label={`${language === "fr" ? "Modifier l'unité" : "Edit unit"} ${unit.unit}`}
+                          title={language === "fr" ? "Modifier l'unité" : "Edit unit"}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openUnitEditor(unit);
+                          }}
+                        >
+                          <ArrowUpRight size={16} aria-hidden="true" />
+                        </button>
                       </div>
-                      <button
-                        type="button"
-                        className="history-button"
-                        onPointerDown={(event) => { event.stopPropagation(); event.nativeEvent.stopImmediatePropagation(); }}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          event.nativeEvent.stopImmediatePropagation();
-                          openUnitHistory(unit);
-                        }}
-                      >
-                        {t("history")}
-                      </button>
-                      <button
-                        type="button"
-                        className="row-action"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          openUnitEditor(unit);
-                        }}
-                      >
-                        →
-                      </button>
                     </div>
                   ))}
                 </div>
