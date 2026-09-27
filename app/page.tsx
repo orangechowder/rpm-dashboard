@@ -689,7 +689,7 @@ function ActivityTimestamp({ updatedAt, language, compact = false }: { updatedAt
   if (!updatedAt || !Number.isFinite(Date.parse(updatedAt))) return <span>{language === "fr" ? "Heure de mise à jour inconnue" : "Update time unavailable"}</span>;
   const absolute = `${formatTorontoDateTime(updatedAt)} (Toronto)`;
   const relative = formatRelativeUpdateTime(updatedAt, now, language);
-  return <time className={`activity-timestamp${compact ? " timestamp-compact" : ""}`} dateTime={updatedAt} title={absolute} aria-live="off">{compact ? relative ?? absolute : relative ? `${relative} · ${absolute}` : absolute}</time>;
+  return <time className={`activity-timestamp${compact ? " timestamp-compact" : ""}`} dateTime={updatedAt} title={absolute} aria-live="off">{compact ? relative ?? "—" : relative ? `${relative} · ${absolute}` : absolute}</time>;
 }
 
 export default function Home() {
@@ -2425,9 +2425,11 @@ export default function Home() {
                         <span>
                           {job.issue}
                         </span>
-                        <ActivityTimestamp updatedAt={job.updatedAt} language={language} />
                       </div>
-                      <StatusPill status={job.status} language={language} />
+                      <div className="activity-trailing">
+                        <StatusPill status={job.status} language={language} />
+                        <ActivityTimestamp updatedAt={job.updatedAt} language={language} compact />
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -2900,7 +2902,7 @@ export default function Home() {
                   icon="!"
                 />
               </div>
-              <section className="section-card full-card">
+              <section className="section-card full-card unit-directory">
                 <div className="toolbar">
                   <div>
                     <p className="card-kicker">{t("assetDatabase")}</p>
@@ -2920,7 +2922,12 @@ export default function Home() {
                     placeholder={language === "en" ? "Search by unit, VIN, or client name..." : "Rechercher une unité, un NIV ou un client..."}
                     aria-label={language === "en" ? "Search units" : "Rechercher les unités"}
                   />
-                  <button className={`outline-button ${pmDueOnly ? "filter-active-button" : ""}`} onClick={() => setPmDueOnly((current) => !current)}>{pmDueOnly ? t("pmDueOnly") : t("filters")}</button>
+                </div>
+                <div className="filter-row unit-filter-row">
+                  <div className="filter-tabs" role="group" aria-label={language === "en" ? "Filter units" : "Filtrer les unités"}>
+                    <button type="button" className={!pmDueOnly ? "filter-active" : ""} aria-pressed={!pmDueOnly} onClick={() => setPmDueOnly(false)}>{language === "en" ? "All units" : "Toutes les unités"}<span>{unitData.length}</span></button>
+                    <button type="button" className={pmDueOnly ? "filter-active" : ""} aria-pressed={pmDueOnly} onClick={() => setPmDueOnly(true)}>{t("pmDueOnly")}<span>{unitData.filter((unit) => pmDueForUnit(unit)).length}</span></button>
+                  </div>
                 </div>
                 <div className="unit-list card-grid">
                   {filteredUnits.map((unit) => (
@@ -2947,7 +2954,7 @@ export default function Home() {
                         <label>{t("lastUsageLabel")}</label>
                         <b>{(() => { const summary = meterSummaryForUnit(unit); return summary.currentMeter == null ? unit.usage : `${summary.currentMeter} ${summary.meterUnit}`; })()}</b>
                       </div>
-                      <div className="unit-meter-summary">{(() => { const summary = meterSummaryForUnit(unit); return <><label>PM / {summary.meterUnit}</label><b>{summary.currentMeter ?? "-"} / {summary.pmInterval}</b>{summary.overdueBy != null && summary.overdueBy > 0 ? <small className="pm-remaining pm-remaining-due">{summary.overdueBy} {summary.meterUnit} {t("pmOverdueBy")}</small> : summary.remaining != null && <small className="pm-remaining">{summary.remaining} {summary.meterUnit} {t("pmRemaining")}</small>}</>; })()}</div>
+                      <div className="unit-meter-summary">{(() => { const summary = meterSummaryForUnit(unit); return summary.overdueBy != null && summary.overdueBy > 0 ? <small className="pm-remaining pm-remaining-due">{summary.overdueBy} {summary.meterUnit} {t("pmOverdueBy")}</small> : summary.remaining != null ? <small className="pm-remaining">{summary.remaining} {summary.meterUnit} {t("pmRemaining")}</small> : <small className="pm-remaining">-</small>; })()}</div>
                       <div className="unit-due">
                         <button
                           type="button"
@@ -3304,7 +3311,7 @@ export default function Home() {
             </ModalFrame>
           )}
           {modal !== "detail" && modal !== "history" && modal && (
-            <ModalFrame title={modal === "job" ? t("createTitle") : editingUnitId ? t("editUnitTitle") : t("addUnitTitle")} onClose={closeModal}>
+            <ModalFrame title={modal === "job" ? t("createTitle") : editingUnitId ? t("editUnitTitle") : t("addUnitTitle")} wide={modal === "unit" && Boolean(editingUnitId)} onClose={closeModal}>
               <form
                 className="modal-card"
                 noValidate
