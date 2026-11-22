@@ -6,9 +6,17 @@ import "./money.css";
 import type { Lang } from "../../lib/money/cents";
 import { addDays, todayISO } from "../../lib/money/dates";
 import {
-  MoneyError, createEntry, loadCategories, loadEntries, loadLocks, loadParties, loadSettings, rememberParty, restoreEntry,
-  saveSettings, trashEntry, updateCategory, updateEntry, uploadReceipt, type EntryInput, type Party,
+  MoneyError, closeMonth, createEntries, createEntry, loadBankBalances, loadCategories, loadEntries, loadLocks, loadParties, loadRules, loadSettings,
+  occurrencesByRule, rememberParty, reopenMonth, restoreEntry, saveBankBalance, saveRule, saveSettings, trashEntry, trashRule, updateCategory, updateEntry,
+  uploadReceipt, type EntryInput, type Party, type RecurringRow, type RuleInput,
 } from "../../lib/money/repository";
+import { datesToSkipOnResume, pendingOccurrences } from "../../lib/money/recurring";
+import { noTaxes, splitTaxesIncluded } from "../../lib/money/tax";
+import { monthTitle } from "../../lib/money/insights";
+import type { Cents } from "../../lib/money/cents";
+import { formatDate, type ISODate } from "../../lib/money/dates";
+import { BillsTab } from "./bills-tab";
+import { StatementTab } from "./statement-tab";
 import { DEFAULT_SETTINGS, type MoneyCategory, type MoneyEntry, type MoneySettings } from "../../lib/money/types";
 import { EntrySheet, type EntryDraft } from "./entry-sheet";
 import { mt, type MoneyKey } from "./i18n";
@@ -21,6 +29,9 @@ export type MoneyTab = "overview" | "log" | "monthly" | "quarterly" | "bills" | 
 const TABS: Array<{ id: MoneyTab; label: MoneyKey }> = [
   { id: "overview", label: "tabOverview" },
   { id: "log", label: "tabLog" },
+  { id: "monthly", label: "tabMonthly" },
+  { id: "quarterly", label: "tabQuarterly" },
+  { id: "bills", label: "tabBills" },
   { id: "settings", label: "tabSettings" },
 ];
 
@@ -36,6 +47,8 @@ export default function MoneyApp({ language, clients }: { language: Lang; client
   const [parties, setParties] = useState<Party[]>([]);
   const [settings, setSettings] = useState<MoneySettings>(DEFAULT_SETTINGS);
   const [locks, setLocks] = useState<Set<string>>(new Set());
+  const [rules, setRules] = useState<RecurringRow[]>([]);
+  const [balances, setBalances] = useState<Map<string, Cents>>(new Map());
   const [sheet, setSheet] = useState<{ draft: EntryDraft; editing: MoneyEntry | null; key: number } | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toastId = useRef(0);
@@ -57,17 +70,52 @@ export default function MoneyApp({ language, clients }: { language: Lang; client
     return mt(lang, "errorGeneric");
   }, [lang]);
 
+  /** Logs every repeating bill that's due and missing (catch-up), never twice. Returns the new entries. */
+  const runBills = useCallback(async (ruleList: RecurringRow[], current: MoneyEntry[], lockSet: Set<string>) => {
+    const today = todayISO();
+    const existing = occurrencesByRule(current);
+    const inputs: EntryInput[] = [];
+    for (const rule of ruleList) {
+      for (const date of pendingOccurrences(rule, existing.get(rule.id) ?? [], today, lockSet)) {
+        const split = rule.taxesIncluded ? splitTaxesIncluded(rule.amountCents) : noTaxes(rule.amountCents);
+        inputs.push({
+          kind: rule.kind, date, categoryId: rule.categoryId, party: rule.party, description: rule.name,
+          totalCents: split.totalCents, gstCents: split.gstCents, qstCents: split.qstCents, taxesIncluded: rule.taxesIncluded,
+          paymentMethod: rule.paymentMethod, paid: rule.autoPaid, paidOn: rule.autoPaid ? date : null, receiptPath: null,
+          recurringId: rule.id, occurrenceDate: date, source: "recurring",
+        });
+      }
+    }
+    if (!inputs.length) return [];
+    return createEntries(inputs, "recurring_id,occurrence_date");
+  }, []);
+
+  const langRef = useRef(lang);
+  const failMessageRef = useRef(failMessage);
+  useEffect(() => { langRef.current = lang; failMessageRef.current = failMessage; }, [lang, failMessage]);
+
   const reload = useCallback(async () => {
     try {
-      const [e, c, p, s, l] = await Promise.all([loadEntries(), loadCategories(), loadParties(), loadSettings(), loadLocks()]);
-      setEntries(e); setCategories(c); setParties(p); setSettings(s); setLocks(l);
+      const [e, c, p, s, l, r, b] = await Promise.all([loadEntries(), loadCategories(), loadParties(), loadSettings(), loadLocks(), loadRules(), loadBankBalances()]);
+      setCategories(c); setParties(p); setSettings(s); setLocks(l); setRules(r); setBalances(b);
+      let all = e;
+      try {
+        const created = await runBills(r, e, l);
+        if (created.length) {
+          all = [...created, ...e];
+          toast(mt(langRef.current, "billsCreated", { count: created.length }));
+        }
+      } catch {
+        // Bills will be retried next time; the rest of Money still works.
+      }
+      setEntries(all);
       setLoadError(null);
     } catch (error) {
-      setLoadError(failMessage(error));
+      setLoadError(failMessageRef.current(error));
     } finally {
       setLoading(false);
     }
-  }, [failMessage]);
+  }, [runBills, toast]);
 
   useEffect(() => {
     // Load once when the section opens; reload() only sets state after its awaits resolve.
@@ -153,6 +201,66 @@ export default function MoneyApp({ language, clients }: { language: Lang; client
     setTab(next);
   };
 
+  const saveBill = async (input: Partial<RuleInput>, id?: string) => {
+    try {
+      const saved = await saveRule(input, id);
+      const nextRules = [...rules.filter((r) => r.id !== saved.id), saved];
+      setRules(nextRules);
+      const created = await runBills([saved], entries, locks);
+      if (created.length) { setEntries((list) => [...created, ...list]); toast(mt(lang, "billsCreated", { count: created.length })); }
+      else toast(mt(lang, "saved"));
+      return true;
+    } catch (error) {
+      toast(failMessage(error), { tone: "error" });
+      return false;
+    }
+  };
+
+  const pauseBill = async (rule: RecurringRow, paused: boolean) => {
+    const today = todayISO();
+    const patch: Partial<RuleInput> = paused
+      ? { paused: true, pausedOn: today }
+      : { paused: false, pausedOn: null, skippedDates: [...new Set([...rule.skippedDates, ...datesToSkipOnResume(rule, rule.pausedOn ?? today, today)])] };
+    await saveBill(patch, rule.id);
+  };
+
+  const skipBill = async (rule: RecurringRow, date: ISODate) => {
+    if (await saveBill({ skippedDates: [...new Set([...rule.skippedDates, date])] }, rule.id)) toast(mt(lang, "skipped", { date: formatDate(date, lang) }));
+  };
+
+  const deleteBill = async (rule: RecurringRow) => {
+    if (!window.confirm(lang === "fr" ? `Supprimer « ${rule.name} »? Ce qui est déjà inscrit reste.` : `Delete “${rule.name}”? What's already logged stays.`)) return;
+    try {
+      await trashRule(rule.id);
+      setRules((list) => list.filter((r) => r.id !== rule.id));
+      toast(mt(lang, "movedToTrash"));
+    } catch (error) {
+      toast(failMessage(error), { tone: "error" });
+    }
+  };
+
+  const toggleMonth = async (month: string, close: boolean) => {
+    const label = monthTitle(month, lang);
+    if (!window.confirm(mt(lang, close ? "closeMonthConfirm" : "reopenMonthConfirm", { month: label }))) return;
+    try {
+      if (close) await closeMonth(month); else await reopenMonth(month);
+      setLocks((set) => { const next = new Set(set); if (close) next.add(month); else next.delete(month); return next; });
+      toast(close ? `${label} · ${mt(lang, "closed")}` : mt(lang, "saved"));
+    } catch (error) {
+      toast(failMessage(error), { tone: "error" });
+    }
+  };
+
+  const saveBalance = async (month: string, cents: Cents) => {
+    try {
+      await saveBankBalance(month, cents);
+      setBalances((map) => new Map(map).set(month, cents));
+      toast(mt(lang, "saved"));
+    } catch (error) {
+      toast(failMessage(error), { tone: "error" });
+    }
+  };
+
   const changeSettings = async (patch: Partial<MoneySettings>) => {
     try {
       await saveSettings(patch);
@@ -189,10 +297,17 @@ export default function MoneyApp({ language, clients }: { language: Lang; client
       {loadError && <p className="mn-banner mn-banner-error" role="alert">{loadError} <button type="button" className="mn-link" onClick={() => { setLoading(true); void reload(); }}>↻</button></p>}
 
       {tab === "overview" && (
-        <OverviewTab lang={lang} entries={entries} categories={categories} settings={settings} rules={[]} loading={loading} period={period} onPeriod={setPeriod} onOpenEntry={openEdit} onMarkPaid={(e) => void markPaid(e)} onGo={goTo} />
+        <OverviewTab lang={lang} entries={entries} categories={categories} settings={settings} rules={rules} loading={loading} period={period} onPeriod={setPeriod} onOpenEntry={openEdit} onMarkPaid={(e) => void markPaid(e)} onGo={goTo} />
       )}
       {tab === "log" && (
         <LogTab key={logFilter.key} initialFilter={logFilter.value} lang={lang} entries={entries} categories={categories} lockedMonths={locks} loading={loading} onEdit={openEdit} onDelete={(e) => void deleteEntry(e)} onDuplicateLast={lastEntry ? () => duplicate(lastEntry) : null} />
+      )}
+      {(tab === "monthly" || tab === "quarterly") && !loading && (
+        <StatementTab key={`${tab}-${focusMonth ?? ""}-${settings.fiscalYearStartMonth}`} lang={lang} mode={tab} entries={entries} categories={categories} settings={settings} locks={locks} balances={balances} focusMonth={focusMonth}
+          onOpenEntry={openEdit} onCloseMonth={(m) => void toggleMonth(m, true)} onReopenMonth={(m) => void toggleMonth(m, false)} onBalance={(m, c) => void saveBalance(m, c)} />
+      )}
+      {tab === "bills" && !loading && (
+        <BillsTab lang={lang} rules={rules} categories={categories} onSave={saveBill} onPause={(r, p) => void pauseBill(r, p)} onSkip={(r, d) => void skipBill(r, d)} onDelete={(r) => void deleteBill(r)} />
       )}
       {tab === "settings" && !loading && (
         <SettingsTab lang={lang} settings={settings} categories={categories} entries={entries} onSaveSettings={changeSettings} onUpdateCategory={changeCategory} onRestore={(e) => void restore(e)} onOpenWizard={() => undefined} />
