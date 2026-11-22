@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentPropsWithoutRef, type ReactNode } from "react";
 import Image from "next/image";
-import { Activity, ArrowRight, ArrowUpRight, CalendarDays, ChartNoAxesCombined, ChevronDown, Clock3, FileText, Gauge, LayoutDashboard, ListFilter, ListTodo, Menu, MoreHorizontal, Plus, Search, Truck, Users, Wallet, Wrench, X, type LucideIcon } from "lucide-react";
+import dynamic from "next/dynamic";
+import { Activity, ArrowRight, ArrowUpRight, CalendarDays, ChartNoAxesCombined, CircleDollarSign, ChevronDown, Clock3, FileText, Gauge, LayoutDashboard, ListFilter, ListTodo, Menu, MoreHorizontal, Plus, Search, Truck, Users, Wallet, Wrench, X, type LucideIcon } from "lucide-react";
 import { clearOfflineMutations, enqueueOfflineMutation, formatRelativeUpdateTime, mergeRemoteRecords, readOfflineMutations, recordsEqual, remoteWins, validateCompletion } from "../lib/reliability";
 import { completeTimeEntry, createManualTimeEntry, createTimeEntry, hasSupabaseConfig, loadDailyTimesheetSummary, loadFleetData, loadPayrollLocks, loadTimeEntries, loadUnitNotes, loadUsers, loadWeeklyTimesheetSummary, removeJob, loadAccountForAuthUser, loadLoginNames, removeTimeEntry, removeUnit, removeUserAccount, saveJobs, saveUnits, saveUsers, subscribeToFleet, updateTimeEntry, upsertPayrollLock, writeActivityLog, type CloudJob, type CloudTimeEntry, type CloudUnit, type CloudUser, type DailyTimesheetSummaryRow, type PayrollPeriodLock, type RealtimeChange, type UnitNote, type WeeklyTimesheetSummaryRow } from "../lib/fleet-repository";
 import { supabase } from "../lib/supabase";
@@ -12,7 +13,10 @@ import { ThemeToggle } from "./theme-provider";
 import { ModalFrame } from "./modal-frame";
 import { ResponsiveTable } from "./responsive-table";
 
-type Section = "overview" | "jobs" | "units" | "users" | "clients" | "punch" | "payroll" | "profitability" | "technicianPayroll";
+// Money / Argent (Admins only) is loaded on demand so other pages don't download its charts and exports.
+const MoneyApp = dynamic(() => import("./money/money-app"), { ssr: false, loading: () => <div className="money-loading" aria-busy="true" /> });
+
+type Section = "overview" | "jobs" | "units" | "users" | "clients" | "punch" | "payroll" | "profitability" | "technicianPayroll" | "money";
 type Language = "en" | "fr";
 type UserAccount = { id: string; name: string; role: "Admin" | "Technician"; active: boolean; isTechnician: boolean; hourlyRate?: number | null; authLinked?: boolean; mustChangePassword?: boolean };
 type JobStatus =
@@ -1301,7 +1305,7 @@ export default function Home() {
       reportActionError(`Punch deletion failed: ${(error as Error).message}`);
     }
   };
-  const visibleNavItems = isAdmin ? [...navItems, { id: "users" as Section, label: "userManagement", icon: <Users size={18} /> }, { id: "payroll" as Section, label: "Payroll", icon: <Wallet size={18} /> }, { id: "profitability" as Section, label: language === "fr" ? "Rentabilité" : "Profitability", icon: <ChartNoAxesCombined size={18} /> }] : [...navItems, { id: "technicianPayroll" as Section, label: "myPayroll", icon: <FileText size={18} /> }];
+  const visibleNavItems = isAdmin ? [...navItems, { id: "users" as Section, label: "userManagement", icon: <Users size={18} /> }, { id: "payroll" as Section, label: "Payroll", icon: <Wallet size={18} /> }, { id: "profitability" as Section, label: language === "fr" ? "Rentabilité" : "Profitability", icon: <ChartNoAxesCombined size={18} /> }, { id: "money" as Section, label: language === "fr" ? "Argent" : "Money", icon: <CircleDollarSign size={18} /> }] : [...navItems, { id: "technicianPayroll" as Section, label: "myPayroll", icon: <FileText size={18} /> }];
   const canManageWorkOrders = isAdmin;
   const isMissingUnit = (unitId: string, client: string) => !unitData.some((unit) => unit.unit === unitId && unit.client === client);
   const unitLabelForJob = (unitId: string, client: string) => !isMissingUnit(unitId, client)
@@ -2885,6 +2889,7 @@ export default function Home() {
               })()}
             </section>
           )}
+          {section === "money" && isAdmin && <MoneyApp language={language} clients={clientData} />}
           {section === "clients" && (
             <section className="section-card full-card client-management-card">
               <div className="toolbar">
