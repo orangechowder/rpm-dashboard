@@ -12,19 +12,23 @@ import {
 import { DEFAULT_SETTINGS, type MoneyCategory, type MoneyEntry, type MoneySettings } from "../../lib/money/types";
 import { EntrySheet, type EntryDraft } from "./entry-sheet";
 import { mt, type MoneyKey } from "./i18n";
-import { LogTab } from "./log-tab";
+import { LogTab, type Filter } from "./log-tab";
+import { initialPeriod, OverviewTab, type PeriodState } from "./overview-tab";
 import { SettingsTab } from "./settings-tab";
 import { ToastHost, type Toast } from "./ui";
 
 export type MoneyTab = "overview" | "log" | "monthly" | "quarterly" | "bills" | "taxes" | "import" | "settings";
 const TABS: Array<{ id: MoneyTab; label: MoneyKey }> = [
+  { id: "overview", label: "tabOverview" },
   { id: "log", label: "tabLog" },
   { id: "settings", label: "tabSettings" },
 ];
 
 export default function MoneyApp({ language, clients }: { language: Lang; clients: string[] }) {
   const lang = language;
-  const [tab, setTab] = useState<MoneyTab>("log");
+  const [tab, setTab] = useState<MoneyTab>("overview");
+  const [period, setPeriod] = useState<PeriodState>(initialPeriod);
+  const [focusMonth, setFocusMonth] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [entries, setEntries] = useState<MoneyEntry[]>([]);
@@ -133,6 +137,22 @@ export default function MoneyApp({ language, clients }: { language: Lang; client
     }
   };
 
+  const markPaid = async (entry: MoneyEntry) => {
+    try {
+      upsertLocal(await updateEntry(entry.id, { paid: true, paidOn: todayISO() }));
+      toast(mt(lang, "saved"));
+    } catch (error) {
+      toast(failMessage(error), { tone: "error" });
+    }
+  };
+
+  const [logFilter, setLogFilter] = useState<{ value: Filter; key: number }>({ value: "all", key: 0 });
+  const goTo = (next: "bills" | "monthly" | "import" | "log-receipts", month?: string) => {
+    if (month) setFocusMonth(month);
+    if (next === "log-receipts") { setLogFilter({ value: "receipt", key: Date.now() }); setTab("log"); return; }
+    setTab(next);
+  };
+
   const changeSettings = async (patch: Partial<MoneySettings>) => {
     try {
       await saveSettings(patch);
@@ -168,8 +188,11 @@ export default function MoneyApp({ language, clients }: { language: Lang; client
 
       {loadError && <p className="mn-banner mn-banner-error" role="alert">{loadError} <button type="button" className="mn-link" onClick={() => { setLoading(true); void reload(); }}>↻</button></p>}
 
+      {tab === "overview" && (
+        <OverviewTab lang={lang} entries={entries} categories={categories} settings={settings} rules={[]} loading={loading} period={period} onPeriod={setPeriod} onOpenEntry={openEdit} onMarkPaid={(e) => void markPaid(e)} onGo={goTo} />
+      )}
       {tab === "log" && (
-        <LogTab lang={lang} entries={entries} categories={categories} lockedMonths={locks} loading={loading} onEdit={openEdit} onDelete={(e) => void deleteEntry(e)} onDuplicateLast={lastEntry ? () => duplicate(lastEntry) : null} />
+        <LogTab key={logFilter.key} initialFilter={logFilter.value} lang={lang} entries={entries} categories={categories} lockedMonths={locks} loading={loading} onEdit={openEdit} onDelete={(e) => void deleteEntry(e)} onDuplicateLast={lastEntry ? () => duplicate(lastEntry) : null} />
       )}
       {tab === "settings" && !loading && (
         <SettingsTab lang={lang} settings={settings} categories={categories} entries={entries} onSaveSettings={changeSettings} onUpdateCategory={changeCategory} onRestore={(e) => void restore(e)} onOpenWizard={() => undefined} />

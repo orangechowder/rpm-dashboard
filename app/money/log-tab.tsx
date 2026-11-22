@@ -8,11 +8,12 @@ import type { MoneyCategory, MoneyEntry } from "../../lib/money/types";
 import { mt } from "./i18n";
 import { Amount, CategoryIcon, Empty, Skeleton } from "./ui";
 
-type Filter = "all" | "in" | "out" | "unpaid" | "receipt";
+export type Filter = "all" | "in" | "out" | "unpaid" | "receipt";
 
 export function LogTab({
-  lang, entries, categories, lockedMonths, loading, onEdit, onDelete, onDuplicateLast,
+  lang, entries, categories, lockedMonths, loading, onEdit, onDelete, onDuplicateLast, initialFilter = "all",
 }: {
+  initialFilter?: Filter;
   lang: Lang;
   entries: MoneyEntry[];
   categories: MoneyCategory[];
@@ -23,7 +24,7 @@ export function LogTab({
   onDuplicateLast: (() => void) | null;
 }) {
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<Filter>("all");
+  const [filter, setFilter] = useState<Filter>(initialFilter);
   const [categoryFilter, setCategoryFilter] = useState("");
   const [days, setDays] = useState(45);
   const byId = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
