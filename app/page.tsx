@@ -4,15 +4,17 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type Compon
 import Image from "next/image";
 import { Activity, ArrowRight, ArrowUpRight, CalendarDays, ChartNoAxesCombined, ChevronDown, Clock3, FileText, Gauge, LayoutDashboard, ListFilter, ListTodo, Menu, MoreHorizontal, Plus, Search, Truck, Users, Wallet, Wrench, X, type LucideIcon } from "lucide-react";
 import { clearOfflineMutations, enqueueOfflineMutation, formatRelativeUpdateTime, mergeRemoteRecords, readOfflineMutations, recordsEqual, remoteWins, validateCompletion } from "../lib/reliability";
-import { completeTimeEntry, createManualTimeEntry, createTimeEntry, hasSupabaseConfig, loadDailyTimesheetSummary, loadFleetData, loadPayrollLocks, loadTimeEntries, loadUnitNotes, loadUsers, loadWeeklyTimesheetSummary, removeJob, removeTimeEntry, removeUnit, removeUserAccount, saveJobs, saveUnits, saveUsers, subscribeToFleet, updateTimeEntry, upsertPayrollLock, writeActivityLog, type CloudJob, type CloudTimeEntry, type CloudUnit, type CloudUser, type DailyTimesheetSummaryRow, type PayrollPeriodLock, type RealtimeChange, type UnitNote, type WeeklyTimesheetSummaryRow } from "../lib/fleet-repository";
+import { completeTimeEntry, createManualTimeEntry, createTimeEntry, hasSupabaseConfig, loadDailyTimesheetSummary, loadFleetData, loadPayrollLocks, loadTimeEntries, loadUnitNotes, loadUsers, loadWeeklyTimesheetSummary, removeJob, loadAccountForAuthUser, loadLoginNames, removeTimeEntry, removeUnit, removeUserAccount, saveJobs, saveUnits, saveUsers, subscribeToFleet, updateTimeEntry, upsertPayrollLock, writeActivityLog, type CloudJob, type CloudTimeEntry, type CloudUnit, type CloudUser, type DailyTimesheetSummaryRow, type PayrollPeriodLock, type RealtimeChange, type UnitNote, type WeeklyTimesheetSummaryRow } from "../lib/fleet-repository";
 import { supabase } from "../lib/supabase";
+import { staffApi } from "../lib/staff-api";
+import { passwordProblem, passwordProblemText, staffEmail, type PasswordProblem } from "../lib/staff-identity";
 import { ThemeToggle } from "./theme-provider";
 import { ModalFrame } from "./modal-frame";
 import { ResponsiveTable } from "./responsive-table";
 
 type Section = "overview" | "jobs" | "units" | "users" | "clients" | "punch" | "payroll" | "profitability" | "technicianPayroll";
 type Language = "en" | "fr";
-type UserAccount = { id: string; name: string; role: "Admin" | "Technician"; password: string; active: boolean; isTechnician: boolean; hourlyRate?: number | null };
+type UserAccount = { id: string; name: string; role: "Admin" | "Technician"; active: boolean; isTechnician: boolean; hourlyRate?: number | null; authLinked?: boolean; mustChangePassword?: boolean };
 type JobStatus =
   "Scheduled" | "In Progress" | "Waiting on Parts" | "Waiting on Estimates" | "Ready for Invoicing" | "Completed";
 type Note = { id: string; text: string; author: string; createdAt: string };
@@ -337,11 +339,12 @@ function sameDay(dateA: string | Date, dateB: string | Date): boolean {
 const defaultClients = [
   "9056-8288 QC INC", "9173-9417 QC INC", "92186758 QC INC", "9418-8877 QC INC", "9567-0006 Québec inc.", "Acier Jean-Guy Robert", "Albert Fortier", "Annypier Maltais", "Aventura Construction", "Bilodeau Transport", "Bistro Tôt ou Tard", "Bruce Hodgins excavation", "Bryan Desloge", "Calmont Leasing", "Carolyne Lepage", "Cgm Boily Transport", "Clean water works", "Construction GFL Inc", "Crescent Moving and Storage", "Danny Jean", "Denis Houde", "Docteur Pavé", "Entretiens Prime Cuts", "Enviroimpact", "Expoland Exibition", "Fastco Canada", "Fritolay", "George", "Gestion TBL inc", "GFL ENVIRONMENT", "Groupe FP Excavation", "Groupe TruStone Inc", "Habitation Nieka INC", "Inox Milton", "International Equestrian Academy", "Jacques", "Js margins", "Justin", "Justin Courtemanche", "Lauren Moyer", "Les entreprises 3gd inc", "Les entreprises JF", "Les Jardins Lamoureux Gardens", "Les transports à nos trois inc.", "Lm.landry", "Mancini Construction", "Mario Cote INC", "Mon P’tit Rozon", "Normand Masson", "Northern Mat & Bridge", "Pavage Bolduc Inc.", "Pavage Milan", "Pavé Morissette Inc.", "Piscines Boisseau", "Pro-BJ Construction", "Purolator", "Real Bombardier", "Richard Phaneuf", "Shawn Chapman", "Solarium Solutions Rénovations", "Stephane Aston", "Terra solution", "TRANSPORT ANT-PASS LTEE", "Transport Bourassa", "Transport LGR", "Transport Martin Lefebvre", "Transport métropolitain Roy", "Transport OSI", "Transport Somavrac Inc", "Transport Sylvester Et Forget", "Transport TFI / Transport JCG", "Transports Roger léger", "Vert le Futur", "Ville de L'Île-Perrot", "VOLOD Transport INC", "Volvo Action Service", "WBM TRANSPORT", "Xavier Trépanier St-Onge", "Élagage O Max INC", "Élodie Lapensée",
 ];
-const defaultUsers: UserAccount[] = [
-  { id: "user-andree-anne", name: "Andrée-Anne", role: "Technician", password: "12345678", active: true, isTechnician: true },
-  { id: "user-marc", name: "Marc", role: "Admin", password: "12345678", active: true, isTechnician: true },
-  { id: "user-dannick", name: "Dannick", role: "Technician", password: "12345678", active: true, isTechnician: true },
-];
+// Accounts and passwords live only in Supabase (Auth + user_accounts). The browser caches the list
+// without any password; older builds stored passwords here, so they are stripped on load.
+function loadCachedUsers(): UserAccount[] {
+  const stored = loadStored<Array<UserAccount & { password?: unknown }>>("rpm-diesel-users", []);
+  return Array.isArray(stored) ? stored.map(({ password: _password, hourlyRate: _hourlyRate, ...account }) => ({ ...account, isTechnician: account.isTechnician ?? account.role === "Technician" })) : [];
+}
 
 const translations: Record<Language, Record<string, string>> = {
   en: {
@@ -554,6 +557,13 @@ function PunchClock({ activeEntry, jobs, language, onClockIn, onClockOut, onStar
 
 type SelectOption = { value: string; label: string };
 // Unit numbers are only unique per client, so identity/lookup keys must combine both fields.
+function cloudOutageMessage(detail: string): string {
+  const databaseDown = /schema cache|PGRST00[0-3]|503|Failed to fetch|NetworkError/i.test(detail);
+  return databaseDown
+    ? `Cloud database unreachable — saved data is safe on the server and will reappear when it reconnects. New changes are kept on this device and sent automatically. (${detail})`
+    : `Cloud sync retrying: ${detail}`;
+}
+
 function unitKey(unit: { unit: string; client: string }): string {
   return JSON.stringify([unit.unit, unit.client]);
 }
@@ -695,16 +705,21 @@ function ActivityTimestamp({ updatedAt, language, compact = false }: { updatedAt
 export default function Home() {
   const clientReady = useSyncExternalStore(() => () => undefined, () => true, () => false);
   const [language, setLanguage] = useState<Language>(() => loadStored("rpm-diesel-language", getDeviceLanguage()));
-  const [activeUser, setActiveUser] = useState<string | null>(() => {
-    const stored = loadStored<string | { name?: string } | null>("rpm-diesel-session", null);
-    return typeof stored === "string" ? stored : stored?.name ?? null;
-  });
-  const [userAccounts, setUserAccounts] = useState<UserAccount[]>(() => loadStored<UserAccount[]>("rpm-diesel-users", defaultUsers).map((account) => ({ ...account, isTechnician: account.isTechnician ?? (account.role === "Technician" || account.name === "Marc") })));
+  // Signed-in name, derived from the Supabase Auth session (never from localStorage).
+  const [activeUser, setActiveUser] = useState<string | null>(null);
+  const [authChecked, setAuthChecked] = useState(!hasSupabaseConfig);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
+  const [loginNames, setLoginNames] = useState<string[]>(() => loadStored<string[]>("rpm-diesel-login-names", []));
+  const [loginStep, setLoginStep] = useState<"password" | "choose">("password");
+  const [loginBusy, setLoginBusy] = useState(false);
+  const [loginMessage, setLoginMessage] = useState<string | null>(null);
+  const [userAccounts, setUserAccounts] = useState<UserAccount[]>(loadCachedUsers);
   const [newUserName, setNewUserName] = useState("");
-  const [newUserPassword, setNewUserPassword] = useState("12345678");
+  const [newUserPassword, setNewUserPassword] = useState("");
   const [newUserIsTechnician, setNewUserIsTechnician] = useState(true);
   const [passwordTargetId, setPasswordTargetId] = useState<string | null>(null);
-  const [managedPassword, setManagedPassword] = useState("12345678");
+  const [managedPassword, setManagedPassword] = useState("");
+  const [userAdminMessage, setUserAdminMessage] = useState<string | null>(null);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   // Dismissed dashboard alerts: cleared on every fresh login, so they reappear next time someone signs in.
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
@@ -848,6 +863,10 @@ export default function Home() {
   const [cloudReady, setCloudReady] = useState(!hasSupabaseConfig);
   const [cloudLoading, setCloudLoading] = useState(hasSupabaseConfig);
   const [cloudError, setCloudError] = useState<string | null>(null);
+  // True only after at least one successful read from the cloud. Until then local state is NOT authoritative
+  // (it may be empty or stale), so nothing is pushed to the cloud — edits are queued locally instead.
+  const [cloudSynced, setCloudSynced] = useState(!hasSupabaseConfig);
+  const offlineFlushInFlight = useRef(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const remoteJobsUpdate = useRef(false);
   const remoteUnitsUpdate = useRef(false);
@@ -967,25 +986,88 @@ export default function Home() {
   const workloadAlert = language === "en"
     ? { assigned: "in-progress job(s) assigned to you.", continue: "Continue these jobs from the active queue.", view: "View jobs →" }
     : { assigned: "travail(aux) en cours vous est assigné.", continue: "Continuez ces travaux depuis la file active.", view: "Voir les travaux →" };
-  const accounts = userAccounts.filter((account) => account.active);
-  const signIn = (event: React.FormEvent<HTMLFormElement>) => {
+  const loginChoices = loginNames.length ? loginNames : userAccounts.filter((account) => account.active).map((account) => account.name);
+  const loginMessageText = (key: string | null) => {
+    if (!key) return null;
+    if (key.startsWith("pw:")) return passwordProblemText[language][key.slice(3) as PasswordProblem];
+    const messages: Record<string, [string, string]> = {
+      disabled: ["This account is disabled. Ask an Admin.", "Ce compte est désactivé. Demandez à un administrateur."],
+      locked: ["Too many wrong tries. Ask an Admin to set a temporary password for you.", "Trop d'essais. Demandez à un administrateur de vous donner un mot de passe temporaire."],
+      server: ["Sign-in is unavailable right now. Try again in a minute.", "La connexion est indisponible. Réessayez dans une minute."],
+      notConfigured: ["Cloud sign-in is not configured on this device.", "La connexion infonuagique n'est pas configurée sur cet appareil."],
+      offline: ["You're offline. Connect to the internet to sign in.", "Vous êtes hors ligne. Connectez-vous à Internet pour vous connecter."],
+      wrongCurrent: ["Your current password is incorrect.", "Votre mot de passe actuel est incorrect."],
+    };
+    const pair = messages[key];
+    return pair ? pair[language === "en" ? 0 : 1] : key;
+  };
+  const resetLoginForm = () => {
+    setLoginPassword(""); setNextPassword(""); setConfirmPassword(""); setLoginStep("password"); setLoginError(false); setLoginMessage(null);
+  };
+  const signIn = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const normalizeName = (value: string) => value.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-    const account = accounts.find((candidate) => normalizeName(candidate.name) === normalizeName(loginName) && candidate.password === loginPassword.trim());
-    if (account) {
-      setActiveUser(account.name);
-      setLoginError(false);
-      setProfileMenuOpen(false);
-      setPasswordEditorOpen(false);
-      setDismissedAlerts(new Set());
-      window.localStorage.setItem("rpm-diesel-session", JSON.stringify(account));
-    } else {
-      setLoginError(true);
+    if (loginBusy) return;
+    if (!supabase) { setLoginMessage("notConfigured"); return; }
+    setLoginBusy(true);
+    setLoginError(false);
+    setLoginMessage(null);
+    try {
+      if (loginStep === "choose") {
+        // First sign-in since the switch: the old password was right, now set the new one.
+        const problem = passwordProblem(nextPassword, confirmPassword, loginPassword.trim());
+        if (problem) { setLoginMessage(`pw:${problem}`); return; }
+        const result = await staffApi("/api/auth/first-login", "POST", { name: loginName, oldPassword: loginPassword, newPassword: nextPassword, confirmPassword }, { anonymous: true });
+        if (!result.ok) {
+          if (result.error === "weak_password") setLoginMessage(`pw:${result.message}`);
+          else if (result.status === 0) setLoginMessage("offline");
+          else if (result.status === 401) { resetLoginForm(); setLoginError(true); }
+          else setLoginMessage("server");
+          return;
+        }
+        const { error } = await supabase.auth.signInWithPassword({ email: String(result.email ?? staffEmail(loginName)), password: nextPassword });
+        if (error) { setLoginMessage("server"); return; }
+        setDismissedAlerts(new Set());
+        resetLoginForm();
+        return;
+      }
+      const { data, error } = await supabase.auth.signInWithPassword({ email: staffEmail(loginName), password: loginPassword });
+      if (data.user && !error) {
+        setDismissedAlerts(new Set());
+        setProfileMenuOpen(false);
+        setPasswordEditorOpen(false);
+        resetLoginForm();
+        return;
+      }
+      if (error && /fetch|network/i.test(error.message)) { setLoginMessage("offline"); return; }
+      // No new login yet for this person: check their old password and, if right, ask for a new one.
+      const legacy = await staffApi("/api/auth/first-login", "POST", { name: loginName, oldPassword: loginPassword }, { anonymous: true });
+      if (legacy.ok && legacy.step === "choose_new_password") { setLoginStep("choose"); setNextPassword(""); setConfirmPassword(""); return; }
+      if (!legacy.ok && legacy.error === "locked") setLoginMessage("locked");
+      else if (!legacy.ok && legacy.status >= 500) setLoginMessage("server");
+      else setLoginError(true);
+    } finally {
+      setLoginBusy(false);
     }
+  };
+  // After an Admin set a temporary password, the person picks their own before using the app.
+  const submitRequiredPasswordChange = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (loginBusy) return;
+    const problem = passwordProblem(nextPassword, confirmPassword);
+    if (problem) { setLoginMessage(`pw:${problem}`); return; }
+    setLoginBusy(true);
+    const result = await staffApi("/api/auth/password", "POST", { newPassword: nextPassword, confirmPassword });
+    setLoginBusy(false);
+    if (!result.ok) { setLoginMessage(result.error === "weak_password" ? `pw:${result.message}` : "server"); return; }
+    setMustChangePassword(false);
+    resetLoginForm();
   };
   const signOut = () => {
     setActiveUser(null);
-    window.localStorage.removeItem("rpm-diesel-session");
+    setMustChangePassword(false);
+    resetLoginForm();
+    window.localStorage.removeItem("rpm-diesel-auth-account");
+    void supabase?.auth.signOut({ scope: "local" });
   };
   const toggleLanguage = () => {
     const next = language === "en" ? "fr" : "en";
@@ -1226,12 +1308,18 @@ export default function Home() {
     ? unitId
     : language === "en" ? `Archived Unit [${unitId}]` : `Unité archivée [${unitId}]`;
   const technicianOptions = ["Unassigned", ...userAccounts.filter((account) => account.active && account.isTechnician).map((account) => account.name)];
-  const addUser = () => {
+  const addUser = async () => {
     const name = newUserName.trim();
-    if (!name || userAccounts.some((account) => account.name.toLowerCase() === name.toLowerCase())) return;
-    setUserAccounts((current) => [...current, { id: `user-${createId()}`, name, role: "Technician", password: newUserPassword || "12345678", active: true, isTechnician: newUserIsTechnician }]);
+    if (!isAdmin || !name || userAccounts.some((account) => account.name.toLowerCase() === name.toLowerCase())) return;
+    const problem = passwordProblem(newUserPassword, newUserPassword);
+    if (problem) { setUserAdminMessage(passwordProblemText[language][problem]); return; }
+    const result = await staffApi("/api/admin/users", "POST", { name, password: newUserPassword, isTechnician: newUserIsTechnician });
+    if (!result.ok) { setUserAdminMessage(result.error === "name_taken" ? (language === "fr" ? "Ce nom existe déjà." : "That name already exists.") : `${language === "fr" ? "Échec de la création" : "Could not add the user"}: ${result.message}`); return; }
+    remoteUsersUpdate.current = true;
+    setUserAccounts((current) => [...current, { id: String(result.id), name, role: "Technician", active: true, isTechnician: newUserIsTechnician, authLinked: true, mustChangePassword: true }]);
+    setUserAdminMessage(language === "fr" ? `${name} est ajouté. Donnez-lui ce mot de passe temporaire; il en choisira un nouveau à sa première connexion.` : `${name} was added. Give them this temporary password; they'll choose their own at first sign-in.`);
     setNewUserName("");
-    setNewUserPassword("12345678");
+    setNewUserPassword("");
     setNewUserIsTechnician(true);
   };
   const toggleUser = (id: string) => setUserAccounts((current) => current.map((account) => account.id === id && account.name !== activeUser ? { ...account, active: !account.active } : account));
@@ -1244,11 +1332,21 @@ export default function Home() {
     setUserAccounts(nextUsers);
     void saveUsers(nextUsers).catch((error: Error) => setCloudError(`User role update failed: ${error.message}`));
   };
-  const saveManagedPassword = () => {
-    if (!passwordTargetId || managedPassword.length < 8) return;
-    setUserAccounts((current) => current.map((account) => account.id === passwordTargetId ? { ...account, password: managedPassword } : account));
+  const saveManagedPassword = async () => {
+    if (!isAdmin || !passwordTargetId) return;
+    const problem = passwordProblem(managedPassword, managedPassword);
+    if (problem) { setUserAdminMessage(passwordProblemText[language][problem]); return; }
+    const target = userAccounts.find((account) => account.id === passwordTargetId);
+    const result = await staffApi("/api/admin/users", "PATCH", { id: passwordTargetId, password: managedPassword });
+    if (!result.ok) { setUserAdminMessage(`${language === "fr" ? "Échec" : "Failed"}: ${result.message}`); return; }
+    const isSelf = target?.name === activeUser;
+    remoteUsersUpdate.current = true;
+    setUserAccounts((current) => current.map((account) => account.id === passwordTargetId ? { ...account, authLinked: true, mustChangePassword: !isSelf } : account));
+    setUserAdminMessage(isSelf
+      ? (language === "fr" ? "Votre mot de passe est changé." : "Your password was changed.")
+      : (language === "fr" ? `Mot de passe temporaire défini pour ${target?.name}. Il devra en choisir un nouveau à sa prochaine connexion.` : `Temporary password set for ${target?.name}. They'll choose a new one at their next sign-in.`));
     setPasswordTargetId(null);
-    setManagedPassword("12345678");
+    setManagedPassword("");
   };
   const removeUser = async (id: string) => {
     if (!isAdmin) return;
@@ -1287,19 +1385,19 @@ export default function Home() {
     addClientName(input.value);
     input.value = "";
   };
-  const changeOwnPassword = () => {
-    const account = userAccounts.find((candidate) => candidate.name === activeUser);
-    if (!account || currentPassword !== account.password) { setPasswordError("Current password is incorrect."); return; }
-    if (nextPassword.length < 8) { setPasswordError("New password must be at least 8 characters."); return; }
-    if (nextPassword !== confirmPassword) { setPasswordError("New passwords do not match."); return; }
-    setUserAccounts((current) => current.map((candidate) => candidate.name === activeUser ? { ...candidate, password: nextPassword } : candidate));
+  const changeOwnPassword = async () => {
+    const problem = passwordProblem(nextPassword, confirmPassword, currentPassword);
+    if (problem) { setPasswordError(passwordProblemText[language][problem]); return; }
+    const result = await staffApi("/api/auth/password", "POST", { currentPassword, newPassword: nextPassword, confirmPassword });
+    if (!result.ok) { setPasswordError(loginMessageText(result.error === "wrong_current_password" ? "wrongCurrent" : result.error === "weak_password" ? `pw:${result.message}` : "server") ?? ""); return; }
     setCurrentPassword(""); setNextPassword(""); setConfirmPassword(""); setPasswordError(""); setPasswordEditorOpen(false); setProfileMenuOpen(false);
   };
   useEffect(() => {
     unitDataRef.current = unitData;
   }, [unitData]);
   useEffect(() => {
-    window.localStorage.setItem("rpm-diesel-users", JSON.stringify(userAccounts));
+    // Never cache pay rates in the browser: a shop computer is shared between Admins and technicians.
+    window.localStorage.setItem("rpm-diesel-users", JSON.stringify(userAccounts.map(({ hourlyRate: _hourlyRate, ...account }) => account)));
   }, [userAccounts]);
   useEffect(() => {
     window.localStorage.setItem("rpm-diesel-clients", JSON.stringify(clientData));
@@ -1315,8 +1413,10 @@ export default function Home() {
   }, [dismissedLongPunchIds]);
   useEffect(() => {
     const flushOfflineMutations = async () => {
+      if (!cloudSynced || offlineFlushInFlight.current) return;
       const pending = readOfflineMutations<OfflinePayload>(window.localStorage, offlineMutationKey);
       if (!pending.length) return;
+      offlineFlushInFlight.current = true;
       const remaining = [] as typeof pending;
       for (const mutation of pending) {
         try {
@@ -1331,13 +1431,19 @@ export default function Home() {
           remaining.push(mutation);
         }
       }
-      if (remaining.length) window.localStorage.setItem(offlineMutationKey, JSON.stringify(remaining));
+      // Re-read so mutations queued while this flush was running are not lost.
+      const queuedDuringFlush = readOfflineMutations<OfflinePayload>(window.localStorage, offlineMutationKey).filter((mutation) => !pending.some((sent) => sent.id === mutation.id));
+      const stillPending = [...remaining, ...queuedDuringFlush];
+      if (stillPending.length) window.localStorage.setItem(offlineMutationKey, JSON.stringify(stillPending));
       else clearOfflineMutations(window.localStorage, offlineMutationKey);
+      offlineFlushInFlight.current = false;
     };
     window.addEventListener("online", flushOfflineMutations);
     void flushOfflineMutations();
-    return () => window.removeEventListener("online", flushOfflineMutations);
-  }, [activeUser]);
+    // A server-side outage never fires the browser "online" event, so keep retrying on a timer too.
+    const flushTimer = window.setInterval(() => void flushOfflineMutations(), 60000);
+    return () => { window.removeEventListener("online", flushOfflineMutations); window.clearInterval(flushTimer); };
+  }, [activeUser, cloudSynced]);
   useEffect(() => {
     meterOverridesRef.current = meterOverrides;
   }, [meterOverrides]);
@@ -1346,7 +1452,7 @@ export default function Home() {
   }, [jobMeterOverrides]);
   useEffect(() => {
     let cancelled = false;
-    if (!hasSupabaseConfig) return;
+    if (!hasSupabaseConfig || !activeUser) return;
     Promise.all([loadFleetData(), loadUsers(), loadTimeEntries(), loadUnitNotes()]).then(([data, cloudUsers, cloudTimeEntries, cloudUnitNotes]) => {
       if (cancelled) return;
       if (data) {
@@ -1369,10 +1475,11 @@ export default function Home() {
       if (cloudTimeEntries) setTimeEntries(cloudTimeEntries);
       if (cloudUnitNotes) setUnitNotes(cloudUnitNotes.reduce<Record<string, UnitNote[]>>((groups, note) => { const current = groups[note.unitId] ?? []; groups[note.unitId] = [...current, note]; return groups; }, {}));
       setCloudError(null);
+      setCloudSynced(true);
       setCloudReady(true);
       setCloudLoading(false);
     }).catch((error: Error) => {
-      setCloudError(error.message);
+      setCloudError(cloudOutageMessage(error.message));
       setCloudReady(true);
       setCloudLoading(false);
     });
@@ -1476,7 +1583,8 @@ export default function Home() {
     return () => { active = false; };
   }, [isAdmin, section, payrollPeriodStart, payrollPeriodEnd, payrollTechFilter, userAccounts]);
   useEffect(() => {
-    if (!cloudReady) return;
+    // Never push the browser's cached user list before the cloud copy has been read: it may be stale and would overwrite newer passwords/rates.
+    if (!cloudReady || !cloudSynced) return;
     if (remoteUsersUpdate.current) {
       remoteUsersUpdate.current = false;
       userAccounts.forEach((account) => usersSyncBaselineRef.current.set(account.id, account));
@@ -1487,7 +1595,7 @@ export default function Home() {
     void saveUsers(changedUsers).then(() => {
       changedUsers.forEach((account) => usersSyncBaselineRef.current.set(account.id, account));
     }).catch((error: Error) => reportActionError(`User data save failed: ${error.message}`));
-  }, [userAccounts, cloudReady]);
+  }, [userAccounts, cloudReady, cloudSynced]);
   useEffect(() => {
     if (!cloudReady) return;
     if (remoteJobsUpdate.current) {
@@ -1495,12 +1603,19 @@ export default function Home() {
       jobData.forEach((job) => jobsSyncBaselineRef.current.set(job.id, job));
       return;
     }
+    if (!cloudSynced) {
+      const pendingJobs = jobData.filter((job) => jobsSyncBaselineRef.current.get(job.id) !== job);
+      if (!pendingJobs.length) return;
+      queueOfflineMutation({ kind: "jobs", jobs: pendingJobs });
+      pendingJobs.forEach((job) => jobsSyncBaselineRef.current.set(job.id, job));
+      return;
+    }
     const changedJobs = jobData.filter((job) => unitDataRef.current.some((unit) => unit.unit === job.unit && unit.client === job.client) && jobsSyncBaselineRef.current.get(job.id) !== job);
     if (!changedJobs.length) return;
     void saveJobs(changedJobs).then(() => {
       changedJobs.forEach((job) => jobsSyncBaselineRef.current.set(job.id, job));
     }).catch((error: Error) => { queueOfflineMutation({ kind: "jobs", jobs: changedJobs }); reportActionError(`Work order data save failed; changes queued for retry: ${error.message}`); });
-  }, [jobData, cloudReady]);
+  }, [jobData, cloudReady, cloudSynced]);
   useEffect(() => {
     if (!cloudReady) return;
     if (remoteUnitsUpdate.current) {
@@ -1510,12 +1625,17 @@ export default function Home() {
     }
     const changedUnits = unitData.filter((unit) => unitsSyncBaselineRef.current.get(unitKey(unit)) !== unit);
     if (!changedUnits.length) return;
+    if (!cloudSynced) {
+      queueOfflineMutation({ kind: "units", units: changedUnits });
+      changedUnits.forEach((unit) => unitsSyncBaselineRef.current.set(unitKey(unit), unit));
+      return;
+    }
     void saveUnits(changedUnits).then(() => {
       changedUnits.forEach((unit) => unitsSyncBaselineRef.current.set(unitKey(unit), unit));
     }).catch((error: Error) => { queueOfflineMutation({ kind: "units", units: changedUnits }); reportActionError(`Unit data save failed; changes queued for retry: ${error.message}`); });
-  }, [unitData, cloudReady]);
+  }, [unitData, cloudReady, cloudSynced]);
   useEffect(() => {
-    if (!cloudReady || !hasSupabaseConfig) return;
+    if (!cloudReady || !hasSupabaseConfig || !activeUser) return;
     const applyUnitChange = (change: RealtimeChange<CloudUnit>) => {
       remoteUnitsUpdate.current = true;
       setUnitData((current) => {
@@ -1570,7 +1690,8 @@ export default function Home() {
         }
         if (cloudTimeEntries) setTimeEntries(cloudTimeEntries);
         setCloudError(null);
-      }).catch((error: Error) => setCloudError(`Cloud sync retrying: ${error.message}`)).finally(() => {
+        setCloudSynced(true);
+      }).catch((error: Error) => setCloudError(cloudOutageMessage(error.message))).finally(() => {
         cloudRefreshInFlight.current = false;
       });
     };
@@ -1611,12 +1732,55 @@ export default function Home() {
     document.documentElement.lang = language;
   }, [language]);
   useEffect(() => {
+    // Older builds kept the whole account, password included, in this key.
+    window.localStorage.removeItem("rpm-diesel-session");
+    const client = supabase;
+    if (!client) return;
+    let cancelled = false;
+    void loadLoginNames().then((names) => {
+      if (cancelled || !names?.length) return;
+      setLoginNames(names);
+      window.localStorage.setItem("rpm-diesel-login-names", JSON.stringify(names));
+    });
+    const { data: listener } = client.auth.onAuthStateChange((event, session) => {
+      if (!session?.user) {
+        setActiveUser(null);
+        setMustChangePassword(false);
+        setAuthChecked(true);
+        return;
+      }
+      if (event !== "INITIAL_SESSION" && event !== "SIGNED_IN" && event !== "USER_UPDATED") return;
+      const authUserId = session.user.id;
+      // Supabase advises against awaiting its own calls inside this callback.
+      window.setTimeout(() => {
+        void loadAccountForAuthUser(authUserId).then((account) => {
+          if (cancelled) return;
+          if (account === undefined) {
+            // Offline or Supabase unreachable: keep the person signed in with the name we saw last time.
+            const cached = loadStored<{ authUserId?: string; name?: string } | null>("rpm-diesel-auth-account", null);
+            if (cached?.authUserId === authUserId && cached.name) setActiveUser(cached.name);
+          } else if (!account || !account.active) {
+            setActiveUser(null);
+            setLoginMessage("disabled");
+            void client.auth.signOut({ scope: "local" });
+          } else {
+            window.localStorage.setItem("rpm-diesel-auth-account", JSON.stringify({ authUserId, name: account.name }));
+            setUserAccounts((current) => current.some((candidate) => candidate.id === account.id)
+              ? current.map((candidate) => candidate.id === account.id ? { ...candidate, ...account } : candidate)
+              : [...current, account]);
+            remoteUsersUpdate.current = true;
+            setActiveUser(account.name);
+            setMustChangePassword(Boolean(account.mustChangePassword));
+          }
+          setAuthChecked(true);
+        });
+      }, 0);
+    });
+    return () => { cancelled = true; listener.subscription.unsubscribe(); };
+  }, []);
+  useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
       try {
-        if (event.key === "rpm-diesel-session") {
-          const stored = event.newValue ? JSON.parse(event.newValue) as string | { name?: string } : null;
-          setActiveUser(typeof stored === "string" ? stored : stored?.name ?? null);
-        }
         if (event.key === "rpm-diesel-language" && event.newValue) {
           const nextLanguage = JSON.parse(event.newValue);
           if (nextLanguage === "en" || nextLanguage === "fr") setLanguage(nextLanguage);
@@ -1678,22 +1842,40 @@ export default function Home() {
       .includes(unitSearch.toLowerCase()),
   );
   const filteredClients = useMemo(() => clientData.filter((client) => client.toLowerCase().includes(clientSearch.toLowerCase())), [clientData, clientSearch]);
-  if (!clientReady) {
+  if (!clientReady || !authChecked) {
     return <main className="login-shell" aria-label="Loading RPM Diesel dashboard" />;
   }
-  if (!activeUser) {
+  const fr = language === "fr";
+  const loginNotice = loginMessageText(loginMessage);
+  if (!activeUser || mustChangePassword) {
+    const forcedChange = Boolean(activeUser && mustChangePassword);
+    const choosing = forcedChange || loginStep === "choose";
     return (
       <main className="login-shell">
         <div className="login-card">
           <Image className="login-logo" src="/logo3.png" alt="RPM Diesel logo" width={96} height={72} priority />
           <p className="card-kicker">RPM DIESEL</p>
-          <h1>{t("loginTitle")}</h1>
-          <p className="login-subtitle">{t("loginSubtitle")}</p>
-          <form onSubmit={signIn} className="login-form">
-            <label>{t("name")}<CustomSelect value={loginName} onChange={setLoginName} options={accounts.map((account) => ({ value: account.name, label: account.name }))} /></label>
-            <label>{t("password")}<input type="password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} autoComplete="current-password" /></label>
-            {loginError && <div className="login-error" role="alert"><strong>{language === "en" ? "Invalid password" : "Mot de passe invalide"}</strong><span>{t("invalidLogin")}</span></div>}
-            <button className="primary-button" type="submit">{t("signIn")}</button>
+          <h1>{choosing ? (fr ? "Choisissez votre nouveau mot de passe" : "Choose your new password") : t("loginTitle")}</h1>
+          <p className="login-subtitle">{choosing
+            ? (forcedChange
+              ? (fr ? "Un administrateur vous a donné un mot de passe temporaire. Choisissez le vôtre pour continuer." : "An Admin gave you a temporary password. Choose your own to continue.")
+              : (fr ? "Nous avons amélioré la sécurité de la connexion. Choisissez un nouveau mot de passe (une seule fois)." : "We've made sign-in more secure. Choose a new password (one time only)."))
+            : t("loginSubtitle")}</p>
+          <form onSubmit={forcedChange ? submitRequiredPasswordChange : signIn} className="login-form">
+            {!choosing && <>
+              <label>{t("name")}<CustomSelect value={loginName} onChange={setLoginName} options={loginChoices.map((name) => ({ value: name, label: name }))} /></label>
+              <label>{t("password")}<input type="password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} autoComplete="current-password" /></label>
+            </>}
+            {choosing && <>
+              {!forcedChange && <p className="login-subtitle"><b>{loginName}</b></p>}
+              <label>{t("newPassword")}<input type="password" value={nextPassword} onChange={(event) => setNextPassword(event.target.value)} autoComplete="new-password" minLength={8} autoFocus /></label>
+              <label>{t("confirmPassword")}<input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" minLength={8} /></label>
+              <small className="login-subtitle">{fr ? "Au moins 8 caractères. Pas 12345678." : "At least 8 characters. Not 12345678."}</small>
+            </>}
+            {loginError && <div className="login-error" role="alert"><strong>{fr ? "Mot de passe invalide" : "Invalid password"}</strong><span>{t("invalidLogin")}</span></div>}
+            {loginNotice && <div className="login-error" role="alert"><span>{loginNotice}</span></div>}
+            <button className="primary-button" type="submit" disabled={loginBusy}>{loginBusy ? (fr ? "Un instant…" : "One moment…") : choosing ? (fr ? "Enregistrer et continuer" : "Save and continue") : t("signIn")}</button>
+            {choosing && <button type="button" className="outline-button" onClick={forcedChange ? signOut : resetLoginForm}>{forcedChange ? t("signOut") : t("cancel")}</button>}
           </form>
           <button className="language-button login-language" onClick={toggleLanguage}>{language === "en" ? "FR" : "EN"}</button>
         </div>
@@ -2267,7 +2449,7 @@ export default function Home() {
                   <input type="password" value={nextPassword} onChange={(event) => setNextPassword(event.target.value)} placeholder={t("newPassword")} aria-label={t("newPassword")} />
                   <input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder={t("confirmPassword")} aria-label={t("confirmPassword")} />
                   {passwordError && <small className="password-error">{passwordError}</small>}
-                  <button className="primary-button" onClick={changeOwnPassword}>{t("updatePassword")}</button>
+                  <button className="primary-button" onClick={() => void changeOwnPassword()}>{t("updatePassword")}</button>
                 </div>}
               </>}
               <button className="profile-menu-item profile-signout" onClick={signOut}>{t("signOut")}</button>
@@ -2732,21 +2914,22 @@ export default function Home() {
               <p className="user-management-copy">{t("manageProfiles")}</p>
               <div className="user-create-row">
                 <input value={newUserName} onChange={(event) => setNewUserName(event.target.value)} placeholder={t("name")} aria-label={t("name")} />
-                <input type="password" value={newUserPassword} onChange={(event) => setNewUserPassword(event.target.value)} placeholder={t("password")} aria-label={t("password")} />
+                <input type="password" value={newUserPassword} onChange={(event) => setNewUserPassword(event.target.value)} placeholder={language === "fr" ? "Mot de passe temporaire" : "Temporary password"} aria-label={language === "fr" ? "Mot de passe temporaire" : "Temporary password"} autoComplete="new-password" />
                 <label className="tech-list-toggle"><input type="checkbox" checked={newUserIsTechnician} onChange={(event) => setNewUserIsTechnician(event.target.checked)} /> {t("technicianList")}</label>
-                <button className="primary-button" onClick={addUser}>{t("addTechnician")}</button>
+                <button className="primary-button" onClick={() => void addUser()}>{t("addTechnician")}</button>
               </div>
+              {userAdminMessage && <div className="alert-banner" role="status"><span>{userAdminMessage}</span><button type="button" onClick={() => setUserAdminMessage(null)} aria-label={t("close")}><X size={16} /></button></div>}
               <div className="user-list">
                 {userAccounts.map((account) => (
                   <div className="user-row" key={account.id}>
                     <div className="user-avatar">{account.name.slice(0, 2).toUpperCase()}</div>
-                    <div className="user-primary"><b>{account.name}</b><span>{account.role === "Admin" ? t("admin") : t("technician")}</span></div>
+                    <div className="user-primary"><b>{account.name}</b><span>{account.role === "Admin" ? t("admin") : t("technician")}</span><small className={`user-login-state ${account.authLinked && !account.mustChangePassword ? "user-login-ready" : "user-login-pending"}`} title={language === "fr" ? "Nouvelle connexion sécurisée" : "New secure sign-in"}>{account.authLinked ? (account.mustChangePassword ? (language === "fr" ? "Mot de passe temporaire" : "Temporary password") : (language === "fr" ? "Connexion sécurisée ✓" : "Secure sign-in ✓")) : (language === "fr" ? "Pas encore migré" : "Not switched yet")}</small></div>
                     <span className={`user-status ${account.active ? "user-active" : "user-disabled"}`}>{account.active ? t("active") : t("disabled")}</span>
                     <label className="user-rate-field">Hourly rate<input type="number" min="0" step="0.01" value={account.hourlyRate ?? ""} onChange={(event) => { const hourlyRate = event.target.value === "" ? null : Number(event.target.value); const nextUsers = userAccounts.map((candidate) => candidate.id === account.id ? { ...candidate, hourlyRate } : candidate); setUserAccounts(nextUsers); }} aria-label={`Hourly rate for ${account.name}`} /><button type="button" className="outline-button user-rate-save" onClick={() => { const nextUsers = userAccounts.map((candidate) => candidate.id === account.id ? { ...candidate, hourlyRate: account.hourlyRate ?? null } : candidate); void saveUsers(nextUsers).catch((error: Error) => reportActionError(`Hourly rate save failed: ${error.message}`)); }}>Save</button></label>
                     <label className="tech-list-toggle"><input type="checkbox" checked={account.isTechnician} onChange={() => toggleTechnician(account.id)} /> {t("technicianList")}</label>
                     {account.name !== "Marc" && account.name !== activeUser && <button className="outline-button" onClick={() => toggleAdminRole(account.id)}>{account.role === "Admin" ? t("technician") : t("admin")}</button>}
                     <button className="outline-button" onClick={() => setPasswordTargetId(passwordTargetId === account.id ? null : account.id)}>{t("adminChangePassword")}</button>
-                    {passwordTargetId === account.id && <div className="managed-password-editor"><input type="password" value={managedPassword} onChange={(event) => setManagedPassword(event.target.value)} placeholder={t("newPassword")} /><button className="primary-button" onClick={saveManagedPassword}>{t("updatePassword")}</button></div>}
+                    {passwordTargetId === account.id && <div className="managed-password-editor"><input type="password" value={managedPassword} onChange={(event) => setManagedPassword(event.target.value)} placeholder={language === "fr" ? "Mot de passe temporaire" : "Temporary password"} autoComplete="new-password" /><button className="primary-button" onClick={() => void saveManagedPassword()}>{t("updatePassword")}</button></div>}
                     {account.name !== "Marc" && account.name !== activeUser && <button className="outline-button" onClick={() => toggleUser(account.id)}>{account.active ? t("disabled") : t("active")}</button>}
                     {account.name !== "Marc" && account.name !== activeUser && <button className="danger-button user-delete" onClick={() => removeUser(account.id)}>{t("removeUser")}</button>}
                   </div>

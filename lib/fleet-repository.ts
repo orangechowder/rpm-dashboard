@@ -1,5 +1,6 @@
 import { hasSupabaseConfig, supabase } from "./supabase";
 import { isRetryableError, withRetry } from "./reliability";
+import { staffApi } from "./staff-api";
 
 export type CloudUnit = {
   unit: string; vin: string; client: string; type: string; service: string;
@@ -14,7 +15,7 @@ export type CloudJob = {
   issue: string; updated: string; usage: string; meterReading?: number | null; notes?: unknown[]; lineItems?: unknown[];
   updatedAt?: string;
 };
-export type CloudUser = { id: string; name: string; role: "Admin" | "Technician"; password: string; active: boolean; isTechnician: boolean; hourlyRate?: number | null };
+export type CloudUser = { id: string; name: string; role: "Admin" | "Technician"; active: boolean; isTechnician: boolean; hourlyRate?: number | null; authLinked?: boolean; mustChangePassword?: boolean };
 export type CloudTimeEntry = {
   id: string;
   userId: string;
@@ -81,7 +82,7 @@ function mapJob(row: Record<string, unknown>): CloudJob {
   return { id: String(row.id ?? ""), unit: String(row.unit ?? ""), client: String(row.client ?? ""), tech: String(row.tech ?? "Unassigned"), priority: row.priority as CloudJob["priority"], status: row.status as CloudJob["status"], issue: String(row.issue ?? ""), updated: String(row.updated ?? ""), usage: String(row.usage ?? "Not recorded"), meterReading: finiteNumber(row.meter_reading), notes: Array.isArray(row.notes) ? row.notes : [], lineItems: Array.isArray(row.line_items) ? row.line_items : [], updatedAt: typeof row.updated_at === "string" ? row.updated_at : undefined };
 }
 function mapUser(row: Record<string, unknown>): CloudUser {
-  return { id: String(row.id), name: String(row.name), role: row.role as CloudUser["role"], password: String(row.password), active: Boolean(row.active), isTechnician: Boolean(row.is_technician), hourlyRate: finiteNumber(row.hourly_rate) };
+  return { id: String(row.id), name: String(row.name), role: row.role === "Admin" ? "Admin" : "Technician", active: Boolean(row.active), isTechnician: Boolean(row.is_technician), hourlyRate: "hourly_rate" in row ? finiteNumber(row.hourly_rate) : undefined, authLinked: Boolean(row.auth_linked ?? row.auth_user_id), mustChangePassword: Boolean(row.must_change_password) };
 }
 function mapTimeEntry(row: Record<string, unknown>): CloudTimeEntry {
   return {
@@ -201,26 +202,67 @@ export async function saveJobs(jobs: CloudJob[]) {
   if (legacyResult.error) throw legacyResult.error;
 }
 
+// Never select "*" here: the password column is not readable from the browser.
+const USER_COLUMNS = "id,name,role,active,is_technician,hourly_rate,auth_user_id,must_change_password";
+
+/**
+ * Admins get every account (RLS). Technicians only get their own full row, so the rest of the
+ * team comes from staff_directory (names, roles and flags only; no rates).
+ */
 export async function loadUsers() {
   if (!supabase) return null;
-  const { data, error } = await supabase.from("user_accounts").select("*").order("name");
-  if (error?.code === "PGRST205") return null;
-  if (error) throw error;
-  return (data ?? []).map((row) => mapUser(row as Record<string, unknown>));
+  const [own, directory] = await Promise.all([
+    supabase.from("user_accounts").select(USER_COLUMNS).order("name"),
+    supabase.from("staff_directory").select("id,name,role,active,is_technician,auth_linked").order("name"),
+  ]);
+  if (own.error?.code === "PGRST205") return null;
+  if (own.error) throw own.error;
+  const byId = new Map<string, CloudUser>();
+  if (!directory.error) for (const row of directory.data ?? []) byId.set(String(row.id), mapUser(row as Record<string, unknown>));
+  for (const row of own.data ?? []) byId.set(String(row.id), mapUser(row as Record<string, unknown>));
+  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/** Names for the sign-in picker, readable before anyone is signed in (names only). */
+export async function loadLoginNames(): Promise<string[] | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase.rpc("staff_login_names");
+  if (error) return null;
+  return (data as Array<{ name: string } | string> ?? []).map((row) => typeof row === "string" ? row : String(row.name));
+}
+
+/**
+ * The signed-in person's own account, looked up from their Supabase Auth user id.
+ * null = no linked account (or disabled); undefined = could not reach Supabase (offline), so don't sign out.
+ */
+export async function loadAccountForAuthUser(authUserId: string): Promise<CloudUser | null | undefined> {
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase.from("user_accounts").select(USER_COLUMNS).eq("auth_user_id", authUserId).maybeSingle();
+    if (error) return error.code ? null : undefined;
+    return data ? mapUser(data as Record<string, unknown>) : null;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Admin-only (RLS): role, active switch, technician flag and hourly rate. New accounts go through /api/admin/users. */
 export async function saveUsers(users: CloudUser[]) {
-  if (!supabase) return;
-  const { error } = await supabase.from("user_accounts").upsert(users.map((user) => ({ id: user.id, name: user.name, role: user.role, password: user.password, active: user.active, is_technician: user.isTechnician, hourly_rate: user.hourlyRate ?? null, updated_at: new Date().toISOString() })), { onConflict: "id" });
-  if (error?.code === "PGRST205") return;
-  if (error) throw error;
+  const client = supabase;
+  if (!client) return;
+  for (const user of users) {
+    const { error } = await client.from("user_accounts")
+      // A rate the browser doesn't know (undefined: not loaded, or not visible to this user) is left untouched.
+      .update({ role: user.role, active: user.active, is_technician: user.isTechnician, ...(user.hourlyRate !== undefined ? { hourly_rate: user.hourlyRate } : {}), updated_at: new Date().toISOString() })
+      .eq("id", user.id);
+    if (error?.code === "PGRST205") return;
+    if (error) throw error;
+  }
 }
 
 export async function removeUserAccount(id: string) {
-  if (!supabase) return;
-  const { error } = await supabase.from("user_accounts").delete().eq("id", id);
-  if (error?.code === "PGRST205") return;
-  if (error) throw error;
+  const result = await staffApi("/api/admin/users", "DELETE", { id });
+  if (!result.ok) throw new Error(result.message);
 }
 
 export async function loadTimeEntries(userId?: string) {

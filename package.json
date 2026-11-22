@@ -8,7 +8,11 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "backup": "node --env-file=.env.local scripts/backup-supabase.mjs",
+    "db:sql": "node --env-file=.env.local scripts/db-sql.mjs",
+    "check:access": "node --env-file=.env.local scripts/check-access.mjs",
+    "check:lock-dry-run": "node --env-file=.env.local scripts/check-lock-dry-run.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.23",
@@ -26,6 +30,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
+    "pg": "^8.23.1",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^2.1.9"

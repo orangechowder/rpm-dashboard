@@ -46,7 +46,7 @@ create table if not exists public.user_accounts (
   id text primary key,
   name text not null unique,
   role text not null default 'Technician' check (role in ('Admin', 'Technician')),
-  password text not null,
+  password text, -- legacy, removed by migration 20261121000300
   active boolean not null default true,
   is_technician boolean not null default true,
   updated_at timestamptz not null default now()
@@ -271,16 +271,11 @@ drop policy if exists "dashboard users can read accounts" on public.user_account
 drop policy if exists "dashboard users can write accounts" on public.user_accounts;
 drop policy if exists "dashboard users can read time entries" on public.time_entries;
 drop policy if exists "dashboard users can write time entries" on public.time_entries;
-create policy "dashboard users can read units" on public.fleet_units for select to anon, authenticated using (true);
-create policy "dashboard users can write units" on public.fleet_units for all to anon, authenticated using (true) with check (true);
-create policy "dashboard users can read work orders" on public.work_orders for select to anon, authenticated using (true);
-create policy "dashboard users can write work orders" on public.work_orders for all to anon, authenticated using (true) with check (true);
-create policy "dashboard users can read logs" on public.activity_logs for select to anon, authenticated using (true);
-create policy "dashboard users can write logs" on public.activity_logs for insert to anon, authenticated with check (true);
-create policy "dashboard users can read accounts" on public.user_accounts for select to anon, authenticated using (true);
-create policy "dashboard users can write accounts" on public.user_accounts for all to anon, authenticated using (true) with check (true);
-create policy "dashboard users can read time entries" on public.time_entries for select to anon, authenticated using (true);
-create policy "dashboard users can write time entries" on public.time_entries for all to anon, authenticated using (true) with check (true);
+-- The old open policies ("to anon, authenticated using (true)") were removed on 2026-11-21.
+-- Access rules now live in supabase/migrations/ (apply them in order after this file):
+--   20261121000100_phase0a_auth_prepare.sql   signed-in-only policies + Supabase Auth linking
+--   20261121000200_phase0b_auth_lock.sql      removes every public-key (anon) policy and grant
+-- NEVER add a policy "to anon" here again: the anon key ships inside the website.
 
 do $$
 begin
@@ -307,10 +302,6 @@ alter table public.activity_logs add constraint activity_logs_entity_type_check
 
 alter table public.payroll_period_locks enable row level security;
 drop policy if exists "dashboard users can read payroll locks" on public.payroll_period_locks;
-create policy "dashboard users can read payroll locks" on public.payroll_period_locks
-  for select to anon, authenticated using (true);
 drop policy if exists "dashboard users can write payroll locks" on public.payroll_period_locks;
-create policy "dashboard users can write payroll locks" on public.payroll_period_locks
-  for all to anon, authenticated using (true) with check (true);
 
 notify pgrst, 'reload schema';
