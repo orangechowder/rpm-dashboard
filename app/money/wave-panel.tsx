@@ -28,7 +28,7 @@ type Summary = {
   mode: string; counts: { added: number; updated: number; linked: number; trashed: number; flagged: number; payments: number; waiting: number };
   months: Array<{ month: string; waveCents: number; moneyCents: number; waitingCents: number; gapCents: number }>; review: ReviewItem[];
   feeDeltaCents: number; feeBalanceCents: number | null; feeBaselineCents: number | null; syncFrom: string; csvUntil: string | null; newMappings: number;
-  invoices: number; estimates: number; failed: number; samples: Array<{ op: string; date: string; party: string; description: string; category: string; total: number; before?: number }>;
+  invoices: number; estimates: number; estimatesReadable?: boolean; failed: number; samples: Array<{ op: string; date: string; party: string; description: string; category: string; total: number; before?: number }>;
 };
 export type WaveStatus = {
   configured: boolean; configProblem?: string | null; emailAlerts: boolean;

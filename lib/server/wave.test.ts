@@ -49,6 +49,10 @@ describe("Wave client", () => {
     const fetcher = vi.fn().mockResolvedValue(json(200, { errors: [{ message: "Invalid request, authentication expired.", extensions: { code: "UNAUTHENTICATED" } }], data: { business: null } }));
     await expect(graphqlClient("t", fetcher as unknown as typeof fetch)("query { x }")).rejects.toMatchObject({ code: "auth" });
   });
+  it("a part Wave doesn't allow (FORBIDDEN) is not mistaken for an expired sign-in", async () => {
+    const fetcher = vi.fn().mockResolvedValue(json(200, { errors: [{ message: "Action not authorized.", extensions: { code: "FORBIDDEN" } }], data: { business: { estimates: null } } }));
+    await expect(graphqlClient("t", fetcher as unknown as typeof fetch)("query { x }")).rejects.toMatchObject({ code: "forbidden" });
+  });
   it("refreshes tokens", async () => {
     process.env.WAVE_CLIENT_ID = "id"; process.env.WAVE_CLIENT_SECRET = "secret";
     const fetcher = vi.fn().mockResolvedValue(json(200, { access_token: "new", refresh_token: "r2", expires_in: 7200, scope: "invoice:read" }));

@@ -48,13 +48,15 @@ for (const a of accounts.filter((x) => ["CASH_AND_BANK", "MONEY_IN_TRANSIT", "PA
 }
 
 const invoices = await allPages(gql, Q_INVOICES, conn.business_id, "invoices");
-const estimates = await allPages(gql, Q_ESTIMATES, conn.business_id, "estimates");
+let estimates: Record<string, unknown>[] = [];
+let estimatesNote = "";
+try { estimates = await allPages(gql, Q_ESTIMATES, conn.business_id, "estimates"); } catch (e) { estimatesNote = `not readable (${e instanceof Error ? e.message : e})`; }
 const docs = [...invoices.map((r) => normalizeDoc(r, "invoice", byId)), ...estimates.map((r) => normalizeDoc(r, "estimate", byId))];
 const payments = docs.flatMap((d) => d.payments.map((p) => ({ ...p, doc: d })));
 const rawPayments = invoices.flatMap((i) => (i.payments as Record<string, unknown>[]) ?? []);
 console.log("\nInvoices, estimates, payments");
 line("Invoices", `${invoices.length} (statuses ${JSON.stringify(count(invoices, (i) => String(i.status)))})`);
-line("Estimates", `${estimates.length} (${estimates.filter((e) => ((e.payments as unknown[]) ?? []).length).length} with deposits)`);
+line("Estimates", estimatesNote || `${estimates.length} (${estimates.filter((e) => ((e.payments as unknown[]) ?? []).length).length} with deposits)`);
 line("Payments", payments.length);
 line("Payments in 2026", payments.filter((p) => p.date >= "2026-01-01").length);
 line("Amount format (first 3)", rawPayments.slice(0, 3).map((p) => p.amount));

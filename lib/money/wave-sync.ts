@@ -62,6 +62,8 @@ export type PlanInput = {
   csvUntil: ISODate | null;
   /** Review items the person already decided on (ref → decision). */
   decisions: Map<string, ReviewResolution>;
+  /** Wave won't show estimates (no permission): deposits are recognized when applied to an invoice instead. */
+  creditDeposits?: boolean;
   fees: { balanceCents: Cents | null; baselineCents: Cents | null };
   today: ISODate;
 };
@@ -75,6 +77,7 @@ export type Plan = {
 };
 
 const CASH_SUBTYPES = new Set(["CASH_AND_BANK", "MONEY_IN_TRANSIT"]);
+const CREDIT_SUBTYPES = new Set(["SYSTEM_CUSTOMER_CREDITS", "CUSTOMER_PREPAYMENTS_AND_CREDITS"]);
 const month = (d: ISODate) => d.slice(0, 7);
 
 export function taxRole(t: { abbreviation: string; name: string }): "gst" | "qst" | "charge" {
@@ -82,6 +85,14 @@ export function taxRole(t: { abbreviation: string; name: string }): "gst" | "qst
   if (/\b(gst|tps|hst|tvh)\b/.test(s)) return "gst";
   if (/\b(qst|tvq)\b/.test(s)) return "qst";
   return "charge";
+}
+/** A line whose name is a sales tax: GST alone, QST alone, or both together. */
+export function taxLine(label: string): "gst" | "qst" | "both" | null {
+  const s = label.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  if (s.replace(/[^a-z]+/g, " ").trim().split(" ").some((w) => !["tps", "tvq", "gst", "qst", "hst", "tvh", "taxes", "taxe", "tax"].includes(w))) return null;
+  const g = /\b(tps|gst|hst|tvh)\b/.test(s);
+  const q = /\b(tvq|qst)\b/.test(s);
+  return g && q ? "both" : g ? "gst" : q ? "qst" : null;
 }
 export const lineRef = (l: WaveLine) => (l.productId ? `product:${l.productId}` : l.account ? `account:${l.account.id}` : `line:${l.description.trim().toLowerCase().slice(0, 60)}`);
 const lineLabel = (l: WaveLine) => l.productName || l.account?.name || l.description || "—";
@@ -126,6 +137,28 @@ export function splitDoc(gross: Cents, items: Map<string, Cents>, charges: Map<s
   return pieces;
 }
 
+/** Splits a group's entries between payments so each payment's entries add up to it (one entry per category each). */
+export function partition(entries: ExistingEntry[], amounts: Cents[]): number[] | null {
+  const order = entries.map((e, i) => i).sort((a, b) => entries[b].totalCents - entries[a].totalCents);
+  const left = amounts.slice();
+  const cats = amounts.map(() => new Set<string>());
+  const out = new Array<number>(entries.length).fill(-1);
+  let steps = 0;
+  const go = (k: number): boolean => {
+    if (++steps > 20000) return false;
+    if (k === order.length) return left.every((v) => v === 0);
+    const e = entries[order[k]];
+    for (let j = 0; j < amounts.length; j += 1) {
+      if (left[j] < e.totalCents || cats[j].has(e.categoryId)) continue;
+      left[j] -= e.totalCents; cats[j].add(e.categoryId); out[order[k]] = j;
+      if (go(k + 1)) return true;
+      left[j] += e.totalCents; cats[j].delete(e.categoryId);
+    }
+    return false;
+  };
+  return go(0) ? out : null;
+}
+
 type CsvGroup = { id: string; date: ISODate; account: string; invoice: string | null; deposit: boolean; totalCents: Cents; entries: ExistingEntry[]; claimed: boolean };
 
 /** Entries imported from the Wave CSV, grouped back into the payments they came from. */
@@ -166,6 +199,14 @@ export function planSync(input: PlanInput): Plan {
     const b: Built = { items: new Map(), charges: new Map(), gst: 0, qst: 0, missing: [] };
     const rawItems: Array<[string, Cents]> = [];
     for (const line of doc.lines) {
+      // Older invoices typed the taxes as ordinary lines ("TPS", "TVQ • QST", "TPS + TVQ"): they're taxes, not income.
+      const asTax = taxLine(lineLabel(line));
+      if (asTax) {
+        if (asTax === "gst") b.gst += line.subtotalCents;
+        else if (asTax === "qst") b.qst += line.subtotalCents;
+        else { const parts = allocate(line.subtotalCents, [["g", 5000], ["q", 9975]]); b.gst += parts.get("g") ?? 0; b.qst += parts.get("q") ?? 0; }
+        continue;
+      }
       const ref = lineRef(line);
       const cat = ensureRef(ref, "item", lineLabel(line), itemCategory(lineLabel(line)));
       if (!cat) b.missing.push(ref); else rawItems.push([cat, line.subtotalCents]);
@@ -180,11 +221,14 @@ export function planSync(input: PlanInput): Plan {
         }
       }
     }
-    // A discount lowers every line in proportion.
-    const lineSum = rawItems.reduce((s, [, v]) => s + v, 0);
+    // A negative line (e.g. "Crédit") comes off its own category first, like the CSV import; an invoice-level
+    // discount then lowers every category in proportion.
+    const byCategory = new Map<string, Cents>();
+    for (const [k, v] of rawItems) byCategory.set(k, (byCategory.get(k) ?? 0) + v);
+    const lineSum = [...byCategory.values()].reduce((s, v) => s + v, 0);
     const afterDiscount = Math.max(0, lineSum - Math.max(0, doc.discountCents));
-    const scaled = allocate(afterDiscount, rawItems.map(([k, v], i) => [`${i}|${k}`, v] as [string, number]));
-    for (const [k, v] of scaled) { const cat = k.slice(k.indexOf("|") + 1); b.items.set(cat, (b.items.get(cat) ?? 0) + v); }
+    const scaled = allocate(afterDiscount, [...byCategory].filter(([, v]) => v > 0));
+    for (const [cat, v] of scaled) b.items.set(cat, v);
     if (!doc.lines.length) b.missing.push(`doc:${doc.kind}:${doc.id}`);
     built.set(`${doc.kind}:${doc.id}`, b);
   }
@@ -193,9 +237,11 @@ export function planSync(input: PlanInput): Plan {
   type Pay = { doc: WaveDoc; p: WavePayment; gross: Cents; refunds: WavePayment[] };
   const pays: Pay[] = [];
   const refunds: Array<{ doc: WaveDoc; p: WavePayment }> = [];
+  const creditPays: Array<{ doc: WaveDoc; p: WavePayment }> = [];
   for (const doc of input.docs) {
     for (const p of doc.payments) {
       if (!p.active || p.date < input.syncFrom) continue;
+      if (input.creditDeposits && p.amountCents > 0 && CREDIT_SUBTYPES.has(p.account?.subtype ?? "")) { creditPays.push({ doc, p }); continue; }
       if (!p.account || !CASH_SUBTYPES.has(p.account.subtype ?? "")) continue; // deposits applied from credits etc. aren't new money
       const isRefund = p.amountCents < 0 || /refund/i.test(p.transactionType ?? "");
       if (isRefund) refunds.push({ doc, p });
@@ -207,7 +253,9 @@ export function planSync(input: PlanInput): Plan {
   const blockedPayments = new Set<string>();
   for (const r of refunds) {
     const amount = Math.abs(r.p.amountCents);
-    const target = pays.find((x) => x.p.id === r.p.originPaymentId && x.gross >= amount);
+    // The refund's own link first; otherwise the latest payment of the same invoice that covers it (like the CSV import).
+    const target = pays.find((x) => x.p.id === r.p.originPaymentId && x.gross >= amount)
+      ?? pays.filter((x) => x.doc === r.doc && x.p.date <= r.p.date && x.gross >= amount).sort((a, b) => (a.p.date < b.p.date ? 1 : a.p.date > b.p.date ? -1 : b.gross - a.gross))[0];
     if (target) { target.gross -= amount; target.refunds.push(r.p); continue; }
     desired.push({
       wave_key: `wr:${r.p.id}`, wave_payment_id: r.p.id, kind: "out", date: r.p.date, category_id: "other_expenses", party: r.doc.customer,
@@ -250,6 +298,7 @@ export function planSync(input: PlanInput): Plan {
   for (const e of input.existing) if (e.waveKey) keyed.set(e.waveKey, e);
   const groups = csvGroups(input.existing);
   const skipInsert = new Set<string>();
+  const pending: Array<{ x: Pay; account: string; candidates: number }> = [];
   for (const x of pays) {
     const rows = pieceRows.get(x.p.id);
     if (!rows) continue;
@@ -259,7 +308,9 @@ export function planSync(input: PlanInput): Plan {
     const candidates = groups.filter((g) => !g.claimed && g.date === x.p.date && g.account === account && g.totalCents === x.gross
       && (x.doc.kind === "invoice" ? g.invoice === x.doc.number : g.deposit));
     const decision = input.decisions.get(`csv:${x.p.id}`);
-    if (candidates.length === 1) {
+    // Several identical candidates (same date, invoice, account, pieces): any of them is right.
+    const signature = (g: CsvGroup) => g.entries.map((e) => `${e.categoryId}:${e.totalCents}`).sort().join(",");
+    if (candidates.length === 1 || (candidates.length > 1 && candidates.every((g) => signature(g) === signature(candidates[0])))) {
       const g = candidates[0];
       g.claimed = true;
       for (const e of g.entries) {
@@ -272,11 +323,70 @@ export function planSync(input: PlanInput): Plan {
     }
     if (decision === "added") continue; // the person said: add it
     for (const r of rows) skipInsert.add(r.wave_key);
-    flag({
-      ref: `csv:${x.p.id}`, kind: "unmatched", amountCents: x.gross,
-      title: `${x.doc.customer} · ${x.doc.kind === "invoice" ? `Invoice #${x.doc.number}` : `Estimate #${x.doc.number}`}`,
-      details: { date: x.p.date, account, candidates: candidates.length, reason: candidates.length ? "several-matches" : "not-in-csv" },
+    pending.push({ x, account, candidates: candidates.length });
+  }
+  // The CSV import gave two payments of the same invoice, same day, same account one group: split it back.
+  const bundles = new Map<string, typeof pending>();
+  for (const u of pending) { const k = `${u.x.p.date}|${u.account}|${u.x.doc.number}`; bundles.set(k, [...(bundles.get(k) ?? []), u]); }
+  const resolved = new Set<string>();
+  for (const bundle of bundles.values()) {
+    if (bundle.length < 2) continue;
+    const first = bundle[0].x;
+    const total = bundle.reduce((s, u) => s + u.x.gross, 0);
+    const g = groups.find((c) => !c.claimed && c.date === first.p.date && c.account === bundle[0].account && c.invoice === first.doc.number && c.totalCents === total);
+    if (!g) continue;
+    const assignment = partition(g.entries, bundle.map((u) => u.x.gross));
+    if (!assignment) continue;
+    g.claimed = true;
+    g.entries.forEach((e, i) => {
+      const u = bundle[assignment[i]];
+      const match = pieceRows.get(u.x.p.id)?.find((r) => r.category_id === e.categoryId);
+      const key = match ? match.wave_key : `wp:${u.x.p.id}:${e.categoryId}`;
+      ops.push({ op: "link", id: e.id, wave_key: key, wave_payment_id: u.x.p.id });
+      keyed.set(key, { ...e, waveKey: key });
     });
+    for (const u of bundle) { resolved.add(u.x.p.id); for (const r of pieceRows.get(u.x.p.id) ?? []) skipInsert.delete(r.wave_key); }
+  }
+  for (const u of pending) {
+    if (resolved.has(u.x.p.id)) continue;
+    flag({
+      ref: `csv:${u.x.p.id}`, kind: "unmatched", amountCents: u.x.gross,
+      title: `${u.x.doc.customer} · ${u.x.doc.kind === "invoice" ? `Invoice #${u.x.doc.number}` : `Estimate #${u.x.doc.number}`}`,
+      details: { date: u.x.p.date, account: u.account, candidates: u.candidates, reason: u.candidates ? "several-matches" : "not-in-csv" },
+    });
+  }
+
+  // 3b) Deposits (when Wave hides estimates): a deposit applied to an invoice is matched to the deposit already
+  //     imported from the CSV (same invoice, amount within $1). Its entries keep their date and amounts.
+  const creditMonths = new Map<string, Cents>();
+  for (const x of creditPays) {
+    const linked = [...keyed.values()].filter((e) => e.waveKey?.startsWith(`wp:${x.p.id}:`));
+    let entries = linked;
+    if (!entries.length) {
+      const g = groups.find((c) => !c.claimed && c.deposit && c.invoice === x.doc.number && Math.abs(c.totalCents - x.p.amountCents) <= 100);
+      if (g) {
+        g.claimed = true;
+        entries = g.entries.map((e) => ({ ...e, waveKey: `wp:${x.p.id}:${e.categoryId}` }));
+        for (const e of entries) { ops.push({ op: "link", id: e.id, wave_key: e.waveKey!, wave_payment_id: x.p.id }); keyed.set(e.waveKey!, e); }
+      }
+    }
+    if (entries.length) {
+      for (const e of entries) desired.push({ wave_key: e.waveKey!, wave_payment_id: x.p.id, kind: "in", date: e.date, category_id: e.categoryId, party: e.party, description: e.description, total_cents: e.totalCents, gst_cents: e.gstCents, qst_cents: e.qstCents, payment_method: null });
+      const m = month(entries[0].date);
+      creditMonths.set(m, (creditMonths.get(m) ?? 0) + entries.reduce((s, e) => s + (e.deleted ? 0 : e.totalCents), 0));
+      continue;
+    }
+    if (input.decisions.get(`csv:${x.p.id}`) === "added") {
+      const b = built.get(`${x.doc.kind}:${x.doc.id}`)!;
+      const pieces = (!b.missing.length && splitDoc(x.p.amountCents, b.items, b.charges, b.gst, b.qst)) || [{ categoryId: [...b.items.keys()][0] ?? "labour_revenue", ...(() => { const t = splitTaxesIncluded(x.p.amountCents); return { totalCents: x.p.amountCents, gstCents: t.gstCents, qstCents: t.qstCents }; })() }];
+      for (const pc of pieces) desired.push({ wave_key: `wp:${x.p.id}:${pc.categoryId}`, wave_payment_id: x.p.id, kind: "in", date: x.p.date, category_id: pc.categoryId, party: x.doc.customer, description: `Deposit – Invoice #${x.doc.number} (Wave · ${x.p.account?.name ?? ""})`, total_cents: pc.totalCents, gst_cents: pc.gstCents, qst_cents: pc.qstCents, payment_method: null });
+      creditMonths.set(month(x.p.date), (creditMonths.get(month(x.p.date)) ?? 0) + x.p.amountCents);
+      continue;
+    }
+    waiting.set(month(x.p.date), (waiting.get(month(x.p.date)) ?? 0) + x.p.amountCents);
+    creditMonths.set(month(x.p.date), (creditMonths.get(month(x.p.date)) ?? 0) + x.p.amountCents);
+    flag({ ref: `csv:${x.p.id}`, kind: "unmatched", amountCents: x.p.amountCents, title: `${x.doc.customer} · Invoice #${x.doc.number}`,
+      details: { date: x.p.date, account: x.p.account?.name ?? "", candidates: 0, reason: "deposit-applied" } });
   }
 
   // 4) Compare with what Money has.
@@ -298,7 +408,7 @@ export function planSync(input: PlanInput): Plan {
     }
     if (e.deleted) continue; // removed by a person in Money: respected
     const same = e.date === d.date && e.categoryId === d.category_id && e.totalCents === d.total_cents && e.gstCents === d.gst_cents
-      && e.qstCents === d.qst_cents && e.party === d.party && (e.description === d.description || e.source === "import"); // CSV wording is kept
+      && e.qstCents === d.qst_cents && ((e.party === d.party && e.description === d.description) || e.source === "import"); // CSV names and wording are kept
     if (same) continue;
     if (locked(e.date) || locked(d.date)) { lockedChange(d.wave_key, e, d); continue; }
     ops.push({ op: "update", id: e.id, row: d, before: e });
@@ -332,6 +442,7 @@ export function planSync(input: PlanInput): Plan {
   // 6) Safety net: money received per month in Wave vs what Money has from Wave, after this plan.
   const waveByMonth = new Map<string, Cents>();
   for (const x of pays) waveByMonth.set(month(x.p.date), (waveByMonth.get(month(x.p.date)) ?? 0) + x.p.amountCents);
+  for (const [m, v] of creditMonths) waveByMonth.set(m, (waveByMonth.get(m) ?? 0) + v);
   for (const r of refunds) waveByMonth.set(month(r.p.date), (waveByMonth.get(month(r.p.date)) ?? 0) - Math.abs(r.p.amountCents));
   const after = new Map<string, { kind: MoneyKind; date: ISODate; total: Cents; fromWave: boolean }>();
   for (const e of input.existing) if (!e.deleted) after.set(e.id, { kind: e.kind, date: e.date, total: e.totalCents, fromWave: isWaveIncome(e) });

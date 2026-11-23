@@ -48,9 +48,15 @@ export async function fetchWave(gql: GraphQL, businessId: string) {
   }
   const feeAccounts = rawAccounts.filter((a) => (a.subtype as { value?: string } | null)?.value === "PAYMENT_PROCESSING_FEES" && !a.isArchived);
   const feeBalanceCents = feeAccounts.length ? feeAccounts.reduce((s, a) => s + (cents(a.balanceInBusinessCurrency ?? a.balance) ?? 0), 0) : null;
-  const [invoices, estimates] = await Promise.all([allPages(gql, Q_INVOICES, businessId, "invoices"), allPages(gql, Q_ESTIMATES, businessId, "estimates")]);
+  const invoices = await allPages(gql, Q_INVOICES, businessId, "invoices");
+  // Estimates (deposits) need a permission Wave may not grant this app: without it, deposits show up when the invoice is paid.
+  let estimates: Record<string, unknown>[] = [];
+  let estimatesReadable = true;
+  try { estimates = await allPages(gql, Q_ESTIMATES, businessId, "estimates"); } catch (e) {
+    if (e instanceof WaveError && e.code === "forbidden") estimatesReadable = false; else throw e;
+  }
   const docs = [...invoices.map((r) => normalizeDoc(r, "invoice", accounts)), ...estimates.map((r) => normalizeDoc(r, "estimate", accounts))];
-  return { docs, accounts: rawAccounts, feeAccountIds: feeAccounts.map((a) => String(a.id)), feeBalanceCents, invoiceCount: invoices.length, estimateCount: estimates.length };
+  return { docs, accounts: rawAccounts, feeAccountIds: feeAccounts.map((a) => String(a.id)), feeBalanceCents, invoiceCount: invoices.length, estimateCount: estimates.length, estimatesReadable };
 }
 
 const ENTRY_COLS = "id,kind,entry_date,category_id,party_name,description,total_cents,gst_cents,qst_cents,source,import_key,wave_key,deleted_at";
@@ -88,7 +94,7 @@ function csvCutoff(existing: ExistingEntry[]): ISODate | null {
 export type RunSummary = {
   mode: "dry-run" | "sync"; counts: Plan["counts"]; months: Plan["months"]; review: Plan["review"]; feeDeltaCents: number;
   feeBalanceCents: number | null; feeBaselineCents: number | null; syncFrom: string; csvUntil: string | null; newMappings: number;
-  invoices: number; estimates: number; samples: Array<{ op: string; date: string; party: string; description: string; category: string; total: number; before?: number }>;
+  invoices: number; estimates: number; estimatesReadable: boolean; samples: Array<{ op: string; date: string; party: string; description: string; category: string; total: number; before?: number }>;
   failed: number; wave: { calls: number; retries: number; rateHeaders: Record<string, string> };
 };
 
@@ -111,6 +117,7 @@ export async function runWaveSync(options: { mode: "dry-run" | "sync"; trigger: 
     const plan = planSync({
       docs: wave.docs, map: money.map, existing: money.existing, locks: money.locks, syncFrom: syncFrom as ISODate, csvUntil: csvUntil as ISODate | null,
       decisions: money.decisions, fees: { balanceCents: wave.feeBalanceCents, baselineCents: conn.fee_baseline_cents }, today,
+      creditDeposits: !wave.estimatesReadable,
     });
 
     // New Wave products/taxes always get a row (with a suggestion) so they can be mapped in Settings, even on a dry run.
@@ -147,7 +154,7 @@ export async function runWaveSync(options: { mode: "dry-run" | "sync"; trigger: 
     const summary: RunSummary = {
       mode: options.mode, counts: plan.counts, months: plan.months, review: plan.review, feeDeltaCents: plan.feeDeltaCents,
       feeBalanceCents: wave.feeBalanceCents, feeBaselineCents: conn.fee_baseline_cents, syncFrom, csvUntil, newMappings: plan.newMapRows.length,
-      invoices: wave.invoiceCount, estimates: wave.estimateCount, failed, wave: stats,
+      invoices: wave.invoiceCount, estimates: wave.estimateCount, estimatesReadable: wave.estimatesReadable, failed, wave: stats,
       samples: plan.ops.filter((o) => o.op !== "link").slice(0, 300).map((o) => {
         const r = label(o);
         const before = o.op === "update" || o.op === "trash" ? o.before : null;

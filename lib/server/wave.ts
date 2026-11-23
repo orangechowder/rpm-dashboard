@@ -9,7 +9,7 @@ export const WAVE_TOKEN = "https://api.waveapps.com/oauth2/token/";
 export const DEFAULT_SCOPES = "business:read account:read customer:read invoice:read product:read sales_tax:read vendor:read user:read";
 
 export class WaveError extends Error {
-  constructor(public code: "not_configured" | "auth" | "rate_limited" | "graphql" | "http", message: string) { super(message); }
+  constructor(public code: "not_configured" | "auth" | "forbidden" | "rate_limited" | "graphql" | "http", message: string) { super(message); }
 }
 
 export function waveConfig() {
@@ -119,8 +119,10 @@ export function graphqlClient(token: string, fetcher: typeof fetch = fetch, stat
       if (response.status === 401 || response.status === 403) throw new WaveError("auth", `Wave refused the token (${response.status})`);
       const body = (await response.json().catch(() => ({}))) as { data?: Record<string, unknown>; errors?: Array<{ message?: string; extensions?: { code?: string } }> };
       if (body.errors?.length) {
-        const unauth = body.errors.some((e) => /UNAUTHENTICATED|FORBIDDEN/i.test(e.extensions?.code ?? "") || /not authorized|unauthenticated|scope/i.test(e.message ?? ""));
-        throw new WaveError(unauth ? "auth" : "graphql", body.errors.map((e) => e.message).join("; "));
+        // UNAUTHENTICATED = the sign-in expired; FORBIDDEN = this app wasn't given permission for that part (not an expiry).
+        const unauth = body.errors.some((e) => /UNAUTHENTICATED/i.test(e.extensions?.code ?? "") || /authentication expired|unauthenticated/i.test(e.message ?? ""));
+        const forbidden = body.errors.some((e) => /FORBIDDEN/i.test(e.extensions?.code ?? "") || /not authorized/i.test(e.message ?? ""));
+        throw new WaveError(unauth ? "auth" : forbidden ? "forbidden" : "graphql", body.errors.map((e) => e.message).join("; "));
       }
       if (!response.ok || !body.data) throw new WaveError("http", `Wave answered ${response.status}`);
       return body.data;

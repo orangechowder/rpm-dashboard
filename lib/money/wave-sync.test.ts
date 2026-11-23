@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import sample from "./__fixtures__/wave-sample.json";
-import { csvGroups, isWaveIncome, normalizeDoc, planSync, splitDoc, taxRole, type ExistingEntry, type MapRow, type Plan, type PlanInput, type WaveAccountRef, type WaveDoc } from "./wave-sync";
+import { csvGroups, isWaveIncome, normalizeDoc, planSync, splitDoc, taxLine, taxRole, type ExistingEntry, type MapRow, type Plan, type PlanInput, type WaveAccountRef, type WaveDoc } from "./wave-sync";
 
 const accounts = new Map<string, WaveAccountRef>(sample.accounts.map((a) => [a.id, { id: a.id, name: a.name, subtype: a.subtype.value }]));
 const docs: WaveDoc[] = [
@@ -192,5 +192,78 @@ describe("nightly safety net", () => {
     expect(isWaveIncome(e)).toBe(true);
     expect(isWaveIncome({ ...e, kind: "out", categoryId: "bank_fees" })).toBe(false);
     expect(isWaveIncome({ ...e, importKey: "bank|x" })).toBe(false);
+  });
+});
+
+describe("when Wave hides estimates (no permission)", () => {
+  const inv = docs.find((d) => d.number === "301")!;
+  const applied = { ...inv, payments: [...inv.payments.filter((p) => p.id !== "PAY-2C"), { id: "CRED-1", date: "2026-12-04" as const, amountCents: 50000, account: { id: "A-CREDITS", name: "Customer Credit", subtype: "SYSTEM_CUSTOMER_CREDITS" }, method: "CUSTOMER_CREDIT", active: true, transactionType: "SALE", originPaymentId: null }] };
+  const onlyInvoices = docs.filter((d) => d.kind === "invoice").map((d) => (d.number === "301" ? applied : d));
+  const csvDeposit: ExistingEntry = { id: "dep", kind: "in", date: "2026-11-20", categoryId: "service_call_fees", party: "Pavage Bolduc", description: "Deposit – Invoice #301 (Wave · Wave Payments)", totalCents: 50003, gstCents: 0, qstCents: 0, source: "import", importKey: "wave|2026-11-20|in|50003|gl|w|d|0|service_call_fees", waveKey: null, deleted: false };
+  it("a deposit applied to an invoice is matched to the CSV deposit (same invoice, within $1) and nothing changes", () => {
+    const plan = planSync(base({ docs: onlyInvoices, existing: [csvDeposit], csvUntil: "2026-11-30", syncFrom: "2026-01-01", creditDeposits: true }));
+    expect(plan.ops.filter((o) => o.op === "link")).toMatchObject([{ id: "dep", wave_key: "wp:CRED-1:service_call_fees" }]);
+    expect(plan.ops.some((o) => o.op !== "link" && "id" in o && o.id === "dep")).toBe(false);
+    expect(plan.review.some((r) => r.ref === "csv:CRED-1")).toBe(false);
+    expect(plan.months.find((m) => m.month === "2026-11")).toMatchObject({ gapCents: 0 });
+  });
+  it("a deposit that isn't in the CSV waits in 'To review' (its received date is unknown); never added on its own", () => {
+    const plan = planSync(base({ docs: onlyInvoices, creditDeposits: true }));
+    expect(inserts(plan).some((r) => r.wave_payment_id === "CRED-1")).toBe(false);
+    expect(plan.review.find((r) => r.ref === "csv:CRED-1")).toMatchObject({ kind: "unmatched", details: { reason: "deposit-applied" } });
+    expect(plan.review.some((r) => r.kind === "gap")).toBe(false);
+  });
+  it("credit applications are ignored when estimates are readable (the deposit itself is synced)", () => {
+    expect(planSync(base({ docs: onlyInvoices })).review.some((r) => r.ref === "csv:CRED-1")).toBe(false);
+  });
+});
+
+describe("refund without a link to its payment", () => {
+  it("comes off the latest payment of the same invoice, like the CSV import", () => {
+    const docs2 = docs.map((d) => (d.number !== "301" ? d : { ...d, payments: d.payments.map((p) => (p.id === "PAY-2R" ? { ...p, originPaymentId: null, transactionType: "SALE" } : p)) }));
+    const rows = inserts(planSync(base({ docs: docs2 })));
+    expect(rows.some((r) => r.wave_key.startsWith("wr:"))).toBe(false);
+    expect(rows.filter((r) => r.wave_payment_id === "PAY-2").reduce((s, r) => s + r.total_cents, 0)).toBe(59213 - 5000);
+  });
+});
+
+describe("matching the CSV import more closely", () => {
+  const csvEntry = (id: string, date: string, cat: string, cents: number, desc: string, party = "Old Name"): ExistingEntry => ({ id, kind: "in", date, categoryId: cat, party, description: desc, totalCents: cents, gstCents: 0, qstCents: 0, source: "import", importKey: `wave|${date}|in|${cents}|gl|acct|desc|0|${cat}`, waveKey: null, deleted: false });
+  const twoPayments = docs.map((d) => (d.number !== "300" ? d : { ...d, payments: [{ ...d.payments[0], id: "A", amountCents: 100000 }, { ...d.payments[0], id: "B", amountCents: 14975 }] }));
+  it("splits a CSV group that holds two payments of the same invoice on the same day", () => {
+    const plan1 = planSync(base({ docs: twoPayments }));
+    const pieces = inserts(plan1).filter((r) => r.wave_payment_id === "A" || r.wave_payment_id === "B");
+    const csv = pieces.map((r, i) => csvEntry(`c${i}`, r.date, r.category_id, r.total_cents, "Payment for Invoice #300 (Wave · Wave Payments)"));
+    const plan = planSync(base({ docs: twoPayments, existing: csv, csvUntil: "2026-12-31" }));
+    expect(plan.ops.filter((o) => o.op === "link")).toHaveLength(4);
+    expect(plan.review.filter((r) => r.kind === "unmatched").map((r) => r.ref)).not.toContain("csv:A");
+    expect(inserts(plan).some((r) => r.wave_payment_id === "A" || r.wave_payment_id === "B")).toBe(false);
+  });
+  it("keeps the CSV's client name (a customer renamed in Wave isn't a change)", () => {
+    const rows = inserts(planSync(base())).filter((r) => r.wave_payment_id === "PAY-1");
+    const csv = rows.map((r, i) => ({ ...csvEntry(`k${i}`, r.date, r.category_id, r.total_cents, r.description, "Acier Jean-Guy Robert"), gstCents: r.gst_cents, qstCents: r.qst_cents }));
+    const plan = planSync(base({ existing: csv, csvUntil: "2026-12-02" }));
+    expect(plan.ops.filter((o) => o.op === "update")).toEqual([]);
+  });
+  it("a negative line comes off its own category first", () => {
+    const disc = docs.map((d) => (d.number !== "300" ? d : { ...d, lines: [...d.lines, { productId: "P-HOUR", productName: "Hour rate", account: null, description: "Crédit", subtotalCents: -10000, taxes: [] }] }));
+    const roy = inserts(planSync(base({ docs: disc }))).filter((r) => r.wave_payment_id === "PAY-1");
+    const net = (cat: string) => { const r = roy.find((x) => x.category_id === cat)!; return r.total_cents - r.gst_cents - r.qst_cents; };
+    // labour 700 − 100 = 600, parts 300 → net split 2 : 1 of the 1,000.00 before taxes
+    expect(net("labour_revenue") / net("parts_sales")).toBeCloseTo(2, 2);
+  });
+});
+
+describe("taxes typed as invoice lines", () => {
+  it("recognizes TPS / TVQ / “TPS + TVQ” lines as taxes, never as income or a category to map", () => {
+    expect([taxLine("TPS"), taxLine("TVQ • QST"), taxLine("TPS + TVQ"), taxLine("TPS • GST"), taxLine("Hour rate"), taxLine("TPS Hour rate")]).toEqual(["gst", "qst", "both", "gst", null, null]);
+    const old = docs.map((d) => (d.number !== "300" ? d : { ...d, lines: [
+      { productId: "P-HOUR", productName: "Hour rate", account: null, description: "", subtotalCents: 100000, taxes: [] },
+      { productId: "P-TPS", productName: "TPS • GST", account: null, description: "", subtotalCents: 5000, taxes: [] },
+      { productId: "P-TVQ", productName: "TVQ • QST", account: null, description: "", subtotalCents: 9975, taxes: [] },
+    ] }));
+    const plan = planSync(base({ docs: old }));
+    expect(inserts(plan).filter((r) => r.wave_payment_id === "PAY-1")).toEqual([expect.objectContaining({ category_id: "labour_revenue", total_cents: 114975, gst_cents: 5000, qst_cents: 9975 })]);
+    expect(plan.newMapRows.some((m) => /TPS|TVQ/.test(m.label))).toBe(false);
   });
 });
