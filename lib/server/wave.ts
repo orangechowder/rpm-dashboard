@@ -13,9 +13,11 @@ export class WaveError extends Error {
 }
 
 export function waveConfig() {
-  const clientId = process.env.WAVE_CLIENT_ID ?? "";
-  const clientSecret = process.env.WAVE_CLIENT_SECRET ?? "";
-  const key = process.env.MONEY_TOKEN_KEY ?? "";
+  // Pasted values often carry a space, a line break or quotes: ignore them.
+  const clean = (v: string | undefined) => String(v ?? "").trim().replace(/^["']|["']$/g, "").trim();
+  const clientId = clean(process.env.WAVE_CLIENT_ID);
+  const clientSecret = clean(process.env.WAVE_CLIENT_SECRET);
+  const key = clean(process.env.MONEY_TOKEN_KEY);
   let problem: string | null = null;
   if (!clientId || !clientSecret) problem = "WAVE_CLIENT_ID / WAVE_CLIENT_SECRET missing";
   else if (!key) problem = "MONEY_TOKEN_KEY missing";
@@ -72,12 +74,18 @@ export type Tokens = { accessToken: string; refreshToken: string | null; expires
 
 async function tokenRequest(form: Record<string, string>, fetcher: typeof fetch): Promise<Tokens> {
   const c = waveConfig();
-  const response = await fetcher(WAVE_TOKEN, {
+  const send = (basic: boolean) => fetcher(WAVE_TOKEN, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ client_id: c.clientId, client_secret: c.clientSecret, ...form }),
+    headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json", ...(basic ? { Authorization: `Basic ${Buffer.from(`${c.clientId}:${c.clientSecret}`).toString("base64")}` } : {}) },
+    body: new URLSearchParams(basic ? { client_id: c.clientId, ...form } : { client_id: c.clientId, client_secret: c.clientSecret, ...form }),
   });
-  const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  // OAuth servers accept the app's secret either in the form or as HTTP Basic: try the form, then Basic.
+  let response = await send(false);
+  let body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!response.ok && body.error === "invalid_client") {
+    response = await send(true);
+    body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  }
   if (!response.ok || typeof body.access_token !== "string") throw new WaveError("auth", String(body.error_description ?? body.error ?? body.message ?? `token ${response.status}`));
   const expiresIn = Number(body.expires_in);
   return {

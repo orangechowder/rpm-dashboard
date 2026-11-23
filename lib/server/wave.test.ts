@@ -71,3 +71,18 @@ describe("alerts", () => {
     expect(needsAlert(conn({ approved_at: null, status: "expired" }), now)).toBeNull();
   });
 });
+
+describe("token exchange", () => {
+  it("ignores stray spaces/quotes in the keys and retries with HTTP Basic on invalid_client", async () => {
+    process.env.WAVE_CLIENT_ID = " id \n"; process.env.WAVE_CLIENT_SECRET = "\"secret\" ";
+    const { exchangeCode } = await import("./wave");
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json(401, { error: "invalid_client" }))
+      .mockResolvedValueOnce(json(200, { access_token: "a", refresh_token: "r", expires_in: 7200, scope: "invoice:read", businessId: "B" }));
+    const t = await exchangeCode("code", "https://panel.rpm-diesel.ca/api/money/wave/callback", fetcher as unknown as typeof fetch);
+    expect(t).toMatchObject({ accessToken: "a", businessId: "B" });
+    expect(String(fetcher.mock.calls[0][1].body)).toContain("client_id=id&client_secret=secret");
+    expect(fetcher.mock.calls[1][1].headers.Authorization).toBe(`Basic ${Buffer.from("id:secret").toString("base64")}`);
+    expect(String(fetcher.mock.calls[1][1].body)).not.toContain("client_secret");
+  });
+});
