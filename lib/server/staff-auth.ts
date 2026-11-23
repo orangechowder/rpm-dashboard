@@ -101,3 +101,20 @@ export async function readJson(request: Request): Promise<Record<string, unknown
 export function text(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
+
+export function bearerToken(request: Request): string {
+  const header = request.headers.get("authorization") ?? "";
+  return header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
+}
+
+/**
+ * A client that acts AS the signed-in person (their token), so database RLS still applies and the
+ * Money audit log records who did it. Use after requireStaff(); never the service key for Money data.
+ */
+export function userClient(token: string): SupabaseClient {
+  if (!supabaseUrl || !supabasePublicKey) throw new ServerConfigError();
+  return createClient(supabaseUrl, supabasePublicKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { headers: { Authorization: `Bearer ${token}` } },
+  });
+}

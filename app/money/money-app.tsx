@@ -17,6 +17,11 @@ import type { Cents } from "../../lib/money/cents";
 import { formatDate, type ISODate } from "../../lib/money/dates";
 import { BillsTab } from "./bills-tab";
 import { StatementTab } from "./statement-tab";
+import { KeepAsideCard, TaxesTab, TaxReminderBanner, taxReminders, type Filings } from "./taxes-tab";
+import { ImportTab } from "./import-tab";
+import { SetupWizard } from "./wizard";
+import { loadFilings, markFiled, unmarkFiled } from "../../lib/money/repository";
+import type { TaxPeriod } from "../../lib/money/periods";
 import { DEFAULT_SETTINGS, type MoneyCategory, type MoneyEntry, type MoneySettings } from "../../lib/money/types";
 import { EntrySheet, type EntryDraft } from "./entry-sheet";
 import { mt, type MoneyKey } from "./i18n";
@@ -32,6 +37,8 @@ const TABS: Array<{ id: MoneyTab; label: MoneyKey }> = [
   { id: "monthly", label: "tabMonthly" },
   { id: "quarterly", label: "tabQuarterly" },
   { id: "bills", label: "tabBills" },
+  { id: "taxes", label: "tabTaxes" },
+  { id: "import", label: "tabImport" },
   { id: "settings", label: "tabSettings" },
 ];
 
@@ -49,6 +56,8 @@ export default function MoneyApp({ language, clients }: { language: Lang; client
   const [locks, setLocks] = useState<Set<string>>(new Set());
   const [rules, setRules] = useState<RecurringRow[]>([]);
   const [balances, setBalances] = useState<Map<string, Cents>>(new Map());
+  const [filings, setFilings] = useState<Filings>(new Map());
+  const [wizard, setWizard] = useState(false);
   const [sheet, setSheet] = useState<{ draft: EntryDraft; editing: MoneyEntry | null; key: number } | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toastId = useRef(0);
@@ -96,8 +105,9 @@ export default function MoneyApp({ language, clients }: { language: Lang; client
 
   const reload = useCallback(async () => {
     try {
-      const [e, c, p, s, l, r, b] = await Promise.all([loadEntries(), loadCategories(), loadParties(), loadSettings(), loadLocks(), loadRules(), loadBankBalances()]);
-      setCategories(c); setParties(p); setSettings(s); setLocks(l); setRules(r); setBalances(b);
+      const [e, c, p, s, l, r, b, f] = await Promise.all([loadEntries(), loadCategories(), loadParties(), loadSettings(), loadLocks(), loadRules(), loadBankBalances(), loadFilings()]);
+      setCategories(c); setParties(p); setSettings(s); setLocks(l); setRules(r); setBalances(b); setFilings(f);
+      if (!s.setupCompletedAt) setWizard(true);
       let all = e;
       try {
         const created = await runBills(r, e, l);
@@ -261,6 +271,35 @@ export default function MoneyApp({ language, clients }: { language: Lang; client
     }
   };
 
+  const fileTaxes = async (period: TaxPeriod, owed: Cents) => {
+    try {
+      await markFiled(period.start, period.end, owed);
+      setFilings((map) => new Map(map).set(`${period.start}|${period.end}`, { filedOn: todayISO(), amountCents: owed }));
+      toast(mt(lang, "saved"));
+    } catch (error) {
+      toast(failMessage(error), { tone: "error" });
+    }
+  };
+
+  const unfileTaxes = async (period: TaxPeriod) => {
+    try {
+      await unmarkFiled(period.start, period.end);
+      setFilings((map) => { const next = new Map(map); next.delete(`${period.start}|${period.end}`); return next; });
+    } catch (error) {
+      toast(failMessage(error), { tone: "error" });
+    }
+  };
+
+  const finishWizard = async () => {
+    setWizard(false);
+    if (!settings.setupCompletedAt) {
+      const now = new Date().toISOString();
+      try { await saveSettings({ setupCompletedAt: now }); setSettings((s) => ({ ...s, setupCompletedAt: now })); } catch { /* shown again next time */ }
+    }
+  };
+
+  const reminders = useMemo(() => taxReminders(entries, settings, filings), [entries, settings, filings]);
+
   const changeSettings = async (patch: Partial<MoneySettings>) => {
     try {
       await saveSettings(patch);
@@ -294,10 +333,12 @@ export default function MoneyApp({ language, clients }: { language: Lang; client
         </div>
       </div>
 
+      {!loading && tab !== "taxes" && <TaxReminderBanner lang={lang} reminders={reminders} onOpen={() => setTab("taxes")} />}
       {loadError && <p className="mn-banner mn-banner-error" role="alert">{loadError} <button type="button" className="mn-link" onClick={() => { setLoading(true); void reload(); }}>↻</button></p>}
 
       {tab === "overview" && (
-        <OverviewTab lang={lang} entries={entries} categories={categories} settings={settings} rules={rules} loading={loading} period={period} onPeriod={setPeriod} onOpenEntry={openEdit} onMarkPaid={(e) => void markPaid(e)} onGo={goTo} />
+        <OverviewTab lang={lang} entries={entries} categories={categories} settings={settings} rules={rules} loading={loading} period={period} onPeriod={setPeriod} onOpenEntry={openEdit} onMarkPaid={(e) => void markPaid(e)} onGo={goTo}
+          extraCards={!loading ? <KeepAsideCard lang={lang} entries={entries} settings={settings} filings={filings} /> : null} />
       )}
       {tab === "log" && (
         <LogTab key={logFilter.key} initialFilter={logFilter.value} lang={lang} entries={entries} categories={categories} lockedMonths={locks} loading={loading} onEdit={openEdit} onDelete={(e) => void deleteEntry(e)} onDuplicateLast={lastEntry ? () => duplicate(lastEntry) : null} />
@@ -309,8 +350,20 @@ export default function MoneyApp({ language, clients }: { language: Lang; client
       {tab === "bills" && !loading && (
         <BillsTab lang={lang} rules={rules} categories={categories} onSave={saveBill} onPause={(r, p) => void pauseBill(r, p)} onSkip={(r, d) => void skipBill(r, d)} onDelete={(r) => void deleteBill(r)} />
       )}
+      {tab === "taxes" && !loading && (
+        <TaxesTab lang={lang} entries={entries} settings={settings} filings={filings} onFile={(p, o) => void fileTaxes(p, o)} onUnfile={(p) => void unfileTaxes(p)} />
+      )}
+      {tab === "import" && !loading && (
+        <ImportTab lang={lang} entries={entries} categories={categories} parties={parties} settings={settings} locks={locks}
+          onImported={async () => { const [e, p] = await Promise.all([loadEntries(), loadParties()]); setEntries(e); setParties(p); }}
+          onAddCash={() => openNew("out")} onGoMonthly={() => setTab("monthly")} />
+      )}
+      {wizard && !loading && (
+        <SetupWizard lang={lang} settings={settings} categories={categories} rules={rules} onSaveSettings={changeSettings} onUpdateCategory={changeCategory}
+          onSaveBill={(input) => saveBill(input)} onFinish={() => void finishWizard()} onStartImport={() => { void finishWizard(); setTab("import"); }} />
+      )}
       {tab === "settings" && !loading && (
-        <SettingsTab lang={lang} settings={settings} categories={categories} entries={entries} onSaveSettings={changeSettings} onUpdateCategory={changeCategory} onRestore={(e) => void restore(e)} onOpenWizard={() => undefined} />
+        <SettingsTab lang={lang} settings={settings} categories={categories} entries={entries} onSaveSettings={changeSettings} onUpdateCategory={changeCategory} onRestore={(e) => void restore(e)} onOpenWizard={() => setWizard(true)} />
       )}
 
       {sheet && (

@@ -7,12 +7,13 @@ import type { MoneyCategory, MoneyEntry } from "./types";
 import type { PeriodPreset } from "./periods";
 
 const PERIOD_WORDS: Record<PeriodPreset, { en: [string, string]; fr: [string, string] }> = {
-  thisMonth: { en: ["This month", "last month"], fr: ["Ce mois-ci", "le mois dernier"] },
-  lastMonth: { en: ["Last month", "the month before"], fr: ["Le mois dernier", "le mois précédent"] },
-  thisQuarter: { en: ["This quarter", "last quarter"], fr: ["Ce trimestre", "le trimestre dernier"] },
-  thisYear: { en: ["This year", "last year"], fr: ["Cette année", "l'an dernier"] },
-  last12: { en: ["Over the last 12 months", "the 12 months before"], fr: ["Sur les 12 derniers mois", "les 12 mois précédents"] },
-  custom: { en: ["In this period", "the period before"], fr: ["Pendant cette période", "la période précédente"] },
+  // FR second item already carries its preposition ("par rapport au mois dernier").
+  thisMonth: { en: ["This month", "last month"], fr: ["Ce mois-ci", "au mois dernier"] },
+  lastMonth: { en: ["Last month", "the month before"], fr: ["Le mois dernier", "au mois précédent"] },
+  thisQuarter: { en: ["This quarter", "last quarter"], fr: ["Ce trimestre", "au trimestre dernier"] },
+  thisYear: { en: ["This year", "last year"], fr: ["Cette année", "à l'an dernier"] },
+  last12: { en: ["Over the last 12 months", "the 12 months before"], fr: ["Sur les 12 derniers mois", "aux 12 mois précédents"] },
+  custom: { en: ["In this period", "the period before"], fr: ["Pendant cette période", "à la période précédente"] },
 };
 
 /** "This month you kept 18¢ of every dollar. Fuel is up 22% vs last month." */
@@ -45,13 +46,13 @@ export function summarySentence(current: Summary, previous: Summary, preset: Per
   if (best) {
     const pct = formatPercent(Math.abs(best.pct), lang, { digits: 0 });
     parts.push(lang === "fr"
-      ? `${best.name} : ${best.pct > 0 ? "en hausse" : "en baisse"} de ${pct} par rapport à ${before}.`
+      ? `${best.name} : ${best.pct > 0 ? "en hausse" : "en baisse"} de ${pct} par rapport ${before}.`
       : `${best.name} is ${best.pct > 0 ? "up" : "down"} ${pct} vs ${before}.`);
   } else if (previous.incomeCents > 0) {
     const pct = change(current.incomeCents, previous.incomeCents);
     if (pct !== null && Math.abs(pct) >= 0.05) {
       const text = formatPercent(Math.abs(pct), lang, { digits: 0 });
-      parts.push(lang === "fr" ? `L'argent reçu est ${pct > 0 ? "en hausse" : "en baisse"} de ${text} par rapport à ${before}.` : `Money in is ${pct > 0 ? "up" : "down"} ${text} vs ${before}.`);
+      parts.push(lang === "fr" ? `L'argent reçu est ${pct > 0 ? "en hausse" : "en baisse"} de ${text} par rapport ${before}.` : `Money in is ${pct > 0 ? "up" : "down"} ${text} vs ${before}.`);
     }
   }
   return parts.join(" ");

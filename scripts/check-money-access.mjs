@@ -90,7 +90,7 @@ try {
   ok((await as("authenticated", boss, insertEntry, ["2026-11-20"])).error?.includes("money_month_locked") === true, "nothing can be added to a closed month");
   ok((await as("authenticated", boss, `update public.money_entries set entry_date = '2026-12-01' where id = $1`, [id])).error?.includes("money_month_locked") === true, "nothing can be moved out of a closed month");
   ok(!(await as("authenticated", boss, `delete from public.money_month_locks where month = '2026-11-01'`)).error, "reopens November");
-  const unlockLog = await as("authenticated", boss, `select action from public.money_audit_log where table_name = 'money_month_locks' order by id`);
+  const unlockLog = await as("authenticated", boss, `select action from public.money_audit_log where table_name = 'money_month_locks' and actor = 'ZZ Moneycheck Boss' order by id`);
   ok(unlockLog.rows.map((r) => r.action).join() === "insert,delete", "closing and reopening are both logged");
   ok(!(await as("authenticated", boss, `insert into public.money_bank_balances (month, balance_cents) values ('2026-11-01', 1234567)`)).error, "types a bank balance");
   ok(!(await as("authenticated", boss, `update public.money_settings set tax_frequency = 'monthly' where id = 1`)).error, "changes settings");
@@ -114,6 +114,20 @@ try {
     await as("authenticated", boss, `insert into public.money_entries (kind, entry_date, category_id, total_cents, recurring_id, occurrence_date, source) values ('out', '2026-01-01', 'shop_rent', 100000, $1, '2026-01-01', 'recurring')`, [rid]);
     ok(Boolean((await as("authenticated", boss, `insert into public.money_entries (kind, entry_date, category_id, total_cents, recurring_id, occurrence_date, source) values ('out', '2026-01-01', 'shop_rent', 100000, $1, '2026-01-01', 'recurring')`, [rid])).error), "the same bill date can never be logged twice");
     ok((await as("service_role", null, `delete from public.money_recurring where id = $1`, [rid])).error?.includes("money_forbidden") === true, "bills are never hard-deleted");
+  }
+  if ((await client.query(`select to_regclass('public.money_tax_filings') is not null e`)).rows[0].e) {
+    console.log("\nTaxes & imports:");
+    const filing = `insert into public.money_tax_filings (period_start, period_end, amount_cents) values ('2001-01-01', '2001-03-31', 12345) returning created_by`;
+    ok(Boolean((await as("anon", null, filing)).error), "public key can't mark taxes as sent");
+    ok(Boolean((await as("authenticated", tech, filing)).error), "Technician can't mark taxes as sent");
+    const f = await as("authenticated", boss, filing);
+    ok(!f.error && f.rows[0]?.created_by === "ZZ Moneycheck Boss", "Admin marks a period as sent (who recorded)", f.error);
+    ok(!(await as("authenticated", boss, `delete from public.money_tax_filings where period_start = '2001-01-01'`)).error, "Admin can undo it (recorded in history)");
+    const batch = `insert into public.money_import_batches (source, file_name, row_count) values ('bank', 'x.csv', 3) returning id`;
+    ok(Boolean((await as("authenticated", tech, batch)).error), "Technician can't import");
+    const b = await as("authenticated", boss, batch);
+    ok(!b.error, "Admin can import", b.error);
+    ok(Boolean((await as("service_role", null, `delete from public.money_import_batches where id = $1`, [b.rows[0]?.id])).error), "import records can't be deleted");
   }
   const open = await client.query(`select tablename, policyname from pg_policies where schemaname = 'public' and tablename like 'money_%' and ('anon' = any(roles) or 'public' = any(roles))`);
   ok(open.rows.length === 0, "no Money rule open to the public key", JSON.stringify(open.rows));
