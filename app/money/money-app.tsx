@@ -47,7 +47,7 @@ const TABS: Array<{ id: MoneyTab; label: MoneyKey }> = [
 export default function MoneyApp({ language, clients }: { language: Lang; clients: string[] }) {
   const lang = language;
   const [tab, setTab] = useState<MoneyTab>(() => (new URLSearchParams(window.location.search).get("money") === "settings" ? "settings" : "overview"));
-  const [waveResult] = useState(() => new URLSearchParams(window.location.search).get("wave"));
+  const [waveResult] = useState(() => { const q = new URLSearchParams(window.location.search); const r = q.get("wave"); return r && q.get("detail") ? `${r}: ${q.get("detail")}` : r; });
   useEffect(() => {
     if (!new URLSearchParams(window.location.search).get("money")) return;
     window.history.replaceState(null, "", window.location.pathname);

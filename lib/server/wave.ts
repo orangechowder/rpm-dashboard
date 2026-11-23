@@ -16,7 +16,11 @@ export function waveConfig() {
   const clientId = process.env.WAVE_CLIENT_ID ?? "";
   const clientSecret = process.env.WAVE_CLIENT_SECRET ?? "";
   const key = process.env.MONEY_TOKEN_KEY ?? "";
-  return { clientId, clientSecret, key, scopes: process.env.WAVE_SCOPES || DEFAULT_SCOPES, ready: Boolean(clientId && clientSecret && key) };
+  let problem: string | null = null;
+  if (!clientId || !clientSecret) problem = "WAVE_CLIENT_ID / WAVE_CLIENT_SECRET missing";
+  else if (!key) problem = "MONEY_TOKEN_KEY missing";
+  else if (Buffer.from(key, "base64").length !== 32) problem = `MONEY_TOKEN_KEY must be 32 bytes in base64 (it is ${Buffer.from(key, "base64").length}); paste it without quotes or spaces`;
+  return { clientId, clientSecret, key, scopes: process.env.WAVE_SCOPES || DEFAULT_SCOPES, ready: problem === null, problem };
 }
 
 // ---- encryption of stored tokens ----------------------------------------------------------------------

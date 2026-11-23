@@ -14,6 +14,7 @@ export async function GET(request: Request) {
   const { data: lastDry } = await db.from("money_wave_runs").select("id,started_at,summary").eq("mode", "dry-run").eq("ok", true).order("id", { ascending: false }).limit(1).maybeSingle();
   return jsonOk({
     configured: waveConfig().ready,
+    configProblem: waveConfig().problem,
     emailAlerts: Boolean(process.env.RESEND_API_KEY && process.env.MONEY_ALERT_EMAIL),
     connection: conn && {
       businessName: conn.business_name, status: conn.status, connectedBy: conn.connected_by, connectedAt: conn.connected_at,

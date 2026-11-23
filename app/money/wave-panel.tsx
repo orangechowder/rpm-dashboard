@@ -31,7 +31,7 @@ type Summary = {
   invoices: number; estimates: number; failed: number; samples: Array<{ op: string; date: string; party: string; description: string; category: string; total: number; before?: number }>;
 };
 export type WaveStatus = {
-  configured: boolean; emailAlerts: boolean;
+  configured: boolean; configProblem?: string | null; emailAlerts: boolean;
   connection: null | { businessName: string; status: string; connectedBy: string | null; connectedAt: string; approvedAt: string | null; approvedBy: string | null; syncFrom: string | null; csvUntil: string | null; feeBaselineCents: number | null; lastSyncAt: string | null; lastSuccessAt: string | null; lastError: string | null; lastErrorAt: string | null; scope: string };
   runs: Run[]; lastDryRun: { id: number; started_at: string; summary: Summary } | null;
 };
@@ -152,7 +152,7 @@ export function WaveCard({ lang, categories, waveResult, onSynced }: { lang: Lan
       {waveResult === "connected" && c && !c.approvedAt && <p className="mn-banner mn-banner-ok">{L(lang, `Connected to ${c.businessName}. Next: preview the first sync.`, `Connecté à ${c.businessName}. Ensuite : aperçu de la première synchronisation.`)}</p>}
       {error && <p className="mn-banner mn-banner-error" role="alert">{error}</p>}
       {!status ? <p className="mn-muted">{L(lang, "One moment…", "Un instant…")}</p> : !status.configured ? (
-        <p className="mn-muted">{L(lang, "Not set up on the server yet: WAVE_CLIENT_ID, WAVE_CLIENT_SECRET and MONEY_TOKEN_KEY must be added in Vercel.", "Pas encore configuré sur le serveur : WAVE_CLIENT_ID, WAVE_CLIENT_SECRET et MONEY_TOKEN_KEY doivent être ajoutés dans Vercel.")}</p>
+        <p className="mn-muted">{L(lang, "Not set up on the server yet: WAVE_CLIENT_ID, WAVE_CLIENT_SECRET and MONEY_TOKEN_KEY must be added in Vercel.", "Pas encore configuré sur le serveur : WAVE_CLIENT_ID, WAVE_CLIENT_SECRET et MONEY_TOKEN_KEY doivent être ajoutés dans Vercel.")}{status.configProblem ? ` (${status.configProblem})` : ""}</p>
       ) : !c ? (
         <div className="mn-wave-connect">
           <p className="mn-muted">{L(lang, "Your Wave invoices and payments arrive in Money by themselves every night, exactly once. Read-only: Money never changes anything in Wave. Expenses still come from your bank CSV.", "Vos factures et paiements Wave arrivent seuls dans Argent chaque nuit, une seule fois. Lecture seule : Argent ne change jamais rien dans Wave. Les dépenses viennent encore de votre CSV bancaire.")}</p>
