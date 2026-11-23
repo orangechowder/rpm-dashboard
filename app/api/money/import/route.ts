@@ -40,12 +40,22 @@ export async function POST(request: Request) {
     if (given.some((k) => k !== null) && !ownKeys) return jsonError(400, "bad_key");
     const keys = ownKeys ? (given as string[]) : importKeys(list, source);
     const dates = list.map((r) => r.date).sort();
-    const { data: existing, error } = await db.from("money_entries").select(ENTRY_COLUMNS)
-      .gte("entry_date", addDays(dates[0], -60)).lte("entry_date", addDays(dates[dates.length - 1], 60)).limit(20000);
-    if (error) return jsonError(500, "lookup_failed", error.message);
-    const { data: keyed, error: keyError } = await db.from("money_entries").select(ENTRY_COLUMNS).in("import_key", keys.slice(0, 1000));
-    if (keyError) return jsonError(500, "lookup_failed", keyError.message);
-    const entries = [...(existing ?? []), ...(keyed ?? [])].map((row) => rowToEntry(row as Record<string, unknown>));
+    // The database API returns at most 1,000 rows per call and keeps addresses short: page through both lookups.
+    const existing: Record<string, unknown>[] = [];
+    for (let from = 0; from < 50000; from += 1000) {
+      const { data, error } = await db.from("money_entries").select(ENTRY_COLUMNS)
+        .gte("entry_date", addDays(dates[0], -60)).lte("entry_date", addDays(dates[dates.length - 1], 60)).order("id").range(from, from + 999);
+      if (error) return jsonError(500, "lookup_failed", error.message);
+      existing.push(...(data ?? []));
+      if (!data || data.length < 1000) break;
+    }
+    const keyed: Record<string, unknown>[] = [];
+    for (let i = 0; i < keys.length; i += 50) {
+      const { data, error: keyError } = await db.from("money_entries").select(ENTRY_COLUMNS).in("import_key", keys.slice(i, i + 50));
+      if (keyError) return jsonError(500, "lookup_failed", keyError.message);
+      keyed.push(...(data ?? []));
+    }
+    const entries = [...existing, ...keyed].map((row) => rowToEntry(row));
     const unique = [...new Map(entries.map((e) => [e.id, e])).values()];
     const checks = checkDuplicates(list, keys, unique);
     const [{ data: parties }, { data: categories }, { data: history }] = await Promise.all([
