@@ -34,7 +34,11 @@ export async function POST(request: Request) {
     const rows = body.rows.map(cleanRow);
     if (rows.some((r) => !r)) return jsonError(400, "bad_rows");
     const list = rows as ImportRow[];
-    const keys = importKeys(list, source);
+    // Wave General Ledger rows bring their own stable keys (one payment can become several entries).
+    const given = (body.rows as Array<Record<string, unknown>>).map((r) => (typeof r?.key === "string" ? r.key : null));
+    const ownKeys = given.every((k, i) => k !== null && k.length <= 300 && k.startsWith(`${source}|${list[i].date}|${list[i].kind}|${list[i].totalCents}|gl|`));
+    if (given.some((k) => k !== null) && !ownKeys) return jsonError(400, "bad_key");
+    const keys = ownKeys ? (given as string[]) : importKeys(list, source);
     const dates = list.map((r) => r.date).sort();
     const { data: existing, error } = await db.from("money_entries").select(ENTRY_COLUMNS)
       .gte("entry_date", addDays(dates[0], -60)).lte("entry_date", addDays(dates[dates.length - 1], 60)).limit(20000);
@@ -82,7 +86,11 @@ export async function POST(request: Request) {
       if (!key.startsWith(`${source}|${row.date}|${row.kind}|${row.totalCents}|`) || key.length > 300) return jsonError(400, "bad_key");
       let split;
       const taxCents = raw.taxCents === null || raw.taxCents === undefined ? null : Number(raw.taxCents);
-      if (taxCents !== null && Number.isSafeInteger(taxCents) && taxCents > 0) {
+      const exact = raw.gstCents !== undefined && raw.gstCents !== null && raw.qstCents !== undefined && raw.qstCents !== null;
+      if (exact) {
+        // Wave General Ledger: GST and QST already taken from the invoice's own tax lines.
+        split = manualTaxes(row.totalCents, Number(raw.gstCents), Number(raw.qstCents));
+      } else if (taxCents !== null && Number.isSafeInteger(taxCents) && taxCents > 0) {
         const gst = divRound(BigInt(taxCents) * BigInt(5000), 14975); // the tax amount from Wave, split GST:QST = 5 : 9.975
         split = manualTaxes(row.totalCents, gst, taxCents - gst);
       } else {

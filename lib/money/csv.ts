@@ -8,13 +8,19 @@ export type DateFormat = "ymd" | "mdy" | "dmy";
 
 export type ColumnMapping = {
   hasHeader: boolean;
+  /** Lines above the titles / data to ignore (BMO starts with "Following data is valid as of…"). */
+  skip: number;
   date: number;
   description: number;
+  /** A second description column, joined to the first (RBC "Description 2", Scotiabank "Sub-description"). */
+  description2: number | null;
   /** Either one signed amount column… */
   amount: number | null;
   /** …or separate money-out / money-in columns. */
   debit: number | null;
   credit: number | null;
+  /** A column saying Debit / Credit (Scotiabank, BMO) when the amounts have no sign. */
+  type: number | null;
   party: number | null;
   /** Second name column (Wave: Vendor, when Customer is empty). */
   partyAlt: number | null;
@@ -52,6 +58,8 @@ export function parseDate(raw: string, format: DateFormat): ISODate | null {
   if (!text) return null;
   const iso = text.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
   if (iso) return valid(Number(iso[1]), Number(iso[2]), Number(iso[3]));
+  const compact = text.match(/^(20\d{2})(\d{2})(\d{2})$/);
+  if (compact) return valid(Number(compact[1]), Number(compact[2]), Number(compact[3]));
   const words = text.match(/^(\d{1,2})?\s*([a-z]+)\.?\s*(\d{1,2})?,?\s*(\d{4})$/);
   if (words && MONTH_WORDS[words[2]]) return valid(Number(words[4]), MONTH_WORDS[words[2]], Number(words[1] ?? words[3]));
   const parts = text.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})/);
@@ -71,9 +79,9 @@ function valid(year: number, month: number, day: number): ISODate | null {
 }
 
 /** Picks the date format that reads every sample (MM/DD vs DD/MM is decided by values over 12). */
-export function detectDateFormat(samples: string[]): DateFormat {
+export function detectDateFormat(samples: string[], ambiguous: DateFormat = "ymd"): DateFormat {
   const values = samples.map((s) => String(s ?? "").trim()).filter(Boolean);
-  if (values.every((v) => /^\d{4}[-/.]/.test(v))) return "ymd";
+  if (values.every((v) => /^\d{4}[-/.]|^20\d{6}$/.test(v))) return "ymd";
   let firstOver12 = false;
   let secondOver12 = false;
   for (const value of values) {
@@ -84,7 +92,7 @@ export function detectDateFormat(samples: string[]): DateFormat {
   }
   if (firstOver12 && !secondOver12) return "dmy";
   if (secondOver12 && !firstOver12) return "mdy";
-  return "ymd";
+  return values.some((v) => /^\d{1,2}[-/.]\d{1,2}[-/.]/.test(v)) ? ambiguous : "ymd";
 }
 
 const has = (header: string, ...words: string[]) => words.some((word) => header.includes(word));
@@ -94,11 +102,62 @@ function norm(header: string) {
 }
 
 export type CsvPreset = "wave" | "bank" | "desjardins";
+/** Which bank the file looks like it came from (only for display; the reading is driven by the mapping). */
+export type BankName = "desjardins" | "national" | "rbc" | "td" | "bmo" | "scotia" | "tangerine" | "other";
 
-/** Guesses how to read the file from its header row (Wave, Desjardins, or a generic bank export). */
-export function guessMapping(rows: string[][]): { preset: CsvPreset; mapping: ColumnMapping } {
+const DATE_WORDS = ["transaction date", "date de transaction", "date de l'operation", "date operation", "date posted", "posted date", "date d'inscription", "date de comptabilisation", "date"];
+const DESC_WORDS = ["description 1", "description", "libelle", "details", "detail", "merchant", "commercant", "payee", "beneficiaire", "name", "nom", "memo", "transaction"];
+const DESC2_WORDS = ["description 2", "sub-description", "sous-description", "memo"];
+const DEBIT_WORDS = ["debit", "withdrawal", "withdrawals", "retrait", "money out", "sortie", "paiements", "decaissement"];
+const CREDIT_WORDS = ["credit", "deposit", "deposits", "depot", "money in", "entree", "encaissement"];
+const AMOUNT_WORDS = ["transaction amount", "amount", "montant", "cad$", "cad", "valeur"];
+const TYPE_WORDS = ["type of transaction", "transaction type", "type de transaction", "type d'operation", "type"];
+
+/** First header that contains a word, trying the words in order (so "description 1" beats "transaction date"). */
+function findBy(headers: string[], words: string[], exclude: Array<number | null> = []): number | null {
+  for (const word of words) {
+    const i = headers.findIndex((h, k) => !exclude.includes(k) && (h === word || h.includes(word)));
+    if (i >= 0) return i;
+  }
+  return null;
+}
+
+function isDateCell(value: string) {
+  return parseDate(value, "dmy") !== null || parseDate(value, "mdy") !== null;
+}
+
+/** How each column looks in the data (used for files without titles: TD, old Scotiabank, Desjardins). */
+function profile(rows: string[][]) {
+  const width = Math.max(0, ...rows.map((r) => r.length));
+  return Array.from({ length: width }, (_, c) => {
+    const values = rows.map((r) => String(r[c] ?? "").trim());
+    const filled = values.filter(Boolean);
+    return {
+      filled: filled.length,
+      dates: filled.filter(isDateCell).length,
+      numbers: filled.filter((v) => parseMoney(v) !== null).length,
+      negatives: filled.filter((v) => (parseMoney(v) ?? 0) < 0).length,
+      text: filled.filter((v) => /[a-z]{3,}/i.test(v)).reduce((s, v) => s + v.length, 0) / Math.max(1, filled.length),
+      values,
+    };
+  });
+}
+
+function headerRowIndex(rows: string[][]): number | null {
+  for (let i = 0; i < Math.min(rows.length, 12); i += 1) {
+    const cells = (rows[i] ?? []).map(norm);
+    if ((rows[i] ?? []).some((c) => isDateCell(String(c ?? "").trim()))) continue;
+    const hasDate = cells.some((h) => h.includes("date"));
+    const hasMoney = cells.some((h) => [...AMOUNT_WORDS, ...DEBIT_WORDS, ...CREDIT_WORDS].some((w) => h.includes(w)));
+    if (hasDate && hasMoney) return i;
+  }
+  return null;
+}
+
+/** Guesses how to read the file from its header row (Wave, Desjardins, or a Canadian bank / card export). */
+export function guessMapping(rows: string[][]): { preset: CsvPreset; bank: BankName; mapping: ColumnMapping } {
   const first = (rows[0] ?? []).map(norm);
-  const base: ColumnMapping = { hasHeader: true, date: 0, description: 1, amount: 2, debit: null, credit: null, party: null, partyAlt: null, account: null, accountType: null, tax: null, dateFormat: "ymd", flipSigns: false };
+  const base: ColumnMapping = { hasHeader: true, skip: 0, date: 0, description: 1, description2: null, amount: 2, debit: null, credit: null, type: null, party: null, partyAlt: null, account: null, accountType: null, tax: null, dateFormat: "ymd", flipSigns: false };
   const find = (...words: string[]) => { const i = first.findIndex((h) => has(h, ...words)); return i >= 0 ? i : null; };
 
   if (find("account name") !== null && find("transaction date") !== null) {
@@ -118,42 +177,80 @@ export function guessMapping(rows: string[][]): { preset: CsvPreset; mapping: Co
     const vendor = find("vendor");
     mapping.party = customer ?? vendor;
     mapping.partyAlt = customer !== null ? vendor : null;
-    return { preset: "wave", mapping: { ...mapping, dateFormat: detectDateFormat(rows.slice(1, 60).map((r) => r[mapping.date])) } };
+    return { preset: "wave", bank: "other", mapping: { ...mapping, dateFormat: detectDateFormat(rows.slice(1, 60).map((r) => r[mapping.date])) } };
   }
 
-  const looksHeaderless = first.length >= 8 && /^\d{4}\/\d{2}\/\d{2}$/.test(rows[0]?.[3] ?? "") ;
-  if (looksHeaderless || /^\d{4}\/\d{2}\/\d{2}$/.test(rows[0]?.[3] ?? "")) {
-    // Desjardins AccèsD export: no header; date in column 4, description 6, withdrawal 8, deposit 9.
-    return { preset: "desjardins", mapping: { ...base, hasHeader: false, date: 3, description: 5, amount: null, debit: 7, credit: 8, dateFormat: "ymd" } };
-  }
+  const headerAt = headerRowIndex(rows);
+  if (headerAt === null) return headerless(rows, base);
 
-  const mapping: ColumnMapping = { ...base };
-  mapping.date = find("date", "posted", "transaction date", "date de transaction") ?? 0;
-  mapping.description = find("description", "libelle", "details", "merchant", "commercant", "payee", "beneficiaire", "memo", "transaction") ?? 1;
-  const debit = find("debit", "withdrawal", "retrait", "money out", "sortie");
-  const credit = find("credit", "deposit", "depot", "money in", "entree");
+  const headers = (rows[headerAt] ?? []).map(norm);
+  const joined = headers.join("|");
+  const data = rows.slice(headerAt + 1, headerAt + 80);
+  const mapping: ColumnMapping = { ...base, skip: headerAt };
+  mapping.date = findBy(headers, DATE_WORDS) ?? 0;
+  const debit = findBy(headers, DEBIT_WORDS, [mapping.date]);
+  const credit = findBy(headers, CREDIT_WORDS, [mapping.date, debit]);
+  const amount = findBy(headers, AMOUNT_WORDS, [mapping.date]);
+  const type = findBy(headers, TYPE_WORDS, [mapping.date]);
+  // Description: never the date, amount or type column ("Transaction Date" contains "transaction").
+  mapping.description = findBy(headers, DESC_WORDS, [mapping.date, debit, credit, amount, type]) ?? 1;
+  mapping.description2 = findBy(headers, DESC2_WORDS, [mapping.date, mapping.description, debit, credit, amount, type]);
   if (debit !== null && credit !== null && debit !== credit) {
     mapping.amount = null;
     mapping.debit = debit;
     mapping.credit = credit;
   } else {
-    mapping.amount = find("amount", "montant", "cad$", "cad") ?? 2;
+    mapping.amount = amount ?? 2;
+    // Unsigned amounts with a Debit/Credit column (Scotiabank): the type column gives the direction.
+    const col = profile(data)[mapping.amount];
+    const typeValues = type === null ? [] : data.map((r) => norm(r[type] ?? "")).filter(Boolean);
+    if (type !== null && col && col.negatives === 0 && typeValues.length && typeValues.every((v) => /debit|credit|retrait|depot|withdrawal|deposit/.test(v))) mapping.type = type;
   }
-  mapping.hasHeader = first.some((h) => /[a-z]/.test(h)) && !parseMoney(first[mapping.amount ?? mapping.debit ?? 2] ?? "");
-  const dataRows = mapping.hasHeader ? rows.slice(1, 60) : rows.slice(0, 60);
-  mapping.dateFormat = detectDateFormat(dataRows.map((r) => r[mapping.date]));
-  return { preset: "bank", mapping };
+  const french = /montant|retrait|depot|libelle|operation|solde/.test(joined);
+  mapping.dateFormat = detectDateFormat(data.map((r) => r[mapping.date]), french ? "dmy" : "mdy");
+  const bank: BankName = joined.includes("cad$") && joined.includes("description 1") ? "rbc"
+    : joined.includes("first bank card") || joined.includes("date posted") ? "bmo"
+    : joined.includes("sub-description") || joined.includes("type of transaction") ? "scotia"
+    : joined.includes("categorie") && mapping.debit !== null ? "national"
+    : joined.includes("memo") && joined.includes("name") ? "tangerine"
+    : "other";
+  return { preset: "bank", bank, mapping };
+}
+
+function headerless(rows: string[][], base: ColumnMapping): { preset: CsvPreset; bank: BankName; mapping: ColumnMapping } {
+  const sample = rows.slice(0, 80);
+  const cols = profile(sample);
+  // Desjardins AccèsD: no titles, a YYYY/MM/DD date after 3 or 4 account columns, then
+  // transaction no., description, cheque no., withdrawal, deposit, …, balance.
+  const desjardinsDate = cols.findIndex((c, i) => i >= 3 && i <= 4 && c.filled > 0 && c.values.filter(Boolean).every((v) => /^\d{4}\/\d{2}\/\d{2}$/.test(v)));
+  if (desjardinsDate >= 0 && cols.length >= desjardinsDate + 6) {
+    return { preset: "desjardins", bank: "desjardins", mapping: { ...base, hasHeader: false, date: desjardinsDate, description: desjardinsDate + 2, amount: null, debit: desjardinsDate + 4, credit: desjardinsDate + 5, dateFormat: "ymd" } };
+  }
+  const date = cols.findIndex((c) => c.filled > 0 && c.dates / c.filled >= 0.8);
+  const textCols = cols.map((c, i) => ({ c, i })).filter(({ c, i }) => i !== date && c.text > 0 && c.numbers < c.filled);
+  const description = textCols.sort((a, b) => b.c.text - a.c.text)[0]?.i ?? 1;
+  const numeric = cols.map((c, i) => ({ c, i })).filter(({ c, i }) => i !== date && i !== description && c.filled > 0 && c.numbers / c.filled >= 0.9);
+  const mapping: ColumnMapping = { ...base, hasHeader: false, date: Math.max(0, date), description };
+  // Two columns never filled on the same line = withdrawals / deposits (TD: date, description, out, in, balance).
+  const pair = numeric.length >= 2 && sample.every((r) => !(String(r[numeric[0].i] ?? "").trim() && String(r[numeric[1].i] ?? "").trim()));
+  if (pair) { mapping.amount = null; mapping.debit = numeric[0].i; mapping.credit = numeric[1].i; }
+  else mapping.amount = numeric[0]?.i ?? 2;
+  mapping.dateFormat = detectDateFormat(sample.map((r) => r[mapping.date]), "mdy");
+  const bank: BankName = pair && numeric.length >= 3 ? "td" : cols.some((c) => c.values.some((v) => /^(debit|credit)$/i.test(v))) ? "scotia" : "other";
+  return { preset: "bank", bank, mapping };
 }
 
 /** Reads every data row; lines that can't be understood are reported, never guessed. */
 export function readRows(rows: string[][], mapping: ColumnMapping, preset: CsvPreset): { rows: ParsedRow[]; problems: RowProblem[] } {
   const out: ParsedRow[] = [];
   const problems: RowProblem[] = [];
+  const skip = mapping.skip ?? 0;
   rows.forEach((cells, index) => {
-    if (mapping.hasHeader && index === 0) return;
+    if (index < skip) return;
+    if (mapping.hasHeader && index === skip) return;
     if (!cells.some((cell) => String(cell ?? "").trim())) return;
     const line = index + 1;
-    const cell = (column: number | null) => (column === null ? "" : String(cells[column] ?? "").trim());
+    const cell = (column: number | null | undefined) => (column === null || column === undefined ? "" : String(cells[column] ?? "").trim());
     const date = parseDate(cell(mapping.date), mapping.dateFormat);
     if (!date) { problems.push({ line, reason: "date" }); return; }
 
@@ -176,11 +273,16 @@ export function readRows(rows: string[][], mapping: ColumnMapping, preset: CsvPr
       let signed: Cents | null;
       if (mapping.amount !== null) {
         signed = parseMoney(cell(mapping.amount));
+        if (signed !== null && mapping.type !== null && mapping.type !== undefined) {
+          const t = norm(cell(mapping.type));
+          if (/debit|retrait|withdrawal/.test(t)) signed = -Math.abs(signed);
+          else if (/credit|depot|deposit/.test(t)) signed = Math.abs(signed);
+        }
         if (signed !== null && mapping.flipSigns) signed = -signed;
       } else {
         const out = parseMoney(cell(mapping.debit));
         const inn = parseMoney(cell(mapping.credit));
-        signed = out === null && inn === null ? null : (inn ?? 0) - Math.abs(out ?? 0);
+        signed = out === null && inn === null ? null : Math.abs(inn ?? 0) - Math.abs(out ?? 0);
         if (signed !== null && mapping.flipSigns) signed = -signed;
       }
       if (signed === null) { problems.push({ line, reason: "amount" }); return; }
@@ -190,12 +292,14 @@ export function readRows(rows: string[][], mapping: ColumnMapping, preset: CsvPr
     if (cents === null) { problems.push({ line, reason: "amount" }); return; }
     if (cents === 0) { problems.push({ line, reason: "zero" }); return; }
     const tax = mapping.tax === null ? null : parseMoney(cell(mapping.tax));
+    const extra = cell(mapping.description2);
+    const description = [cell(mapping.description), extra].filter(Boolean).join(" · ");
     out.push({
       line,
       date,
       kind,
       totalCents: cents + (preset === "wave" && tax ? Math.abs(tax) : 0),
-      description: cell(mapping.description),
+      description,
       party: cell(mapping.party) || cell(mapping.partyAlt),
       account: cell(mapping.account),
       taxCents: tax === null ? null : Math.abs(tax),

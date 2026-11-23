@@ -4,8 +4,9 @@ import { useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
 import { ArrowLeft, Check, CircleCheck, FileDown, FileSpreadsheet, FileText, Upload, X } from "lucide-react";
 import { formatMoney, type Lang } from "../../lib/money/cents";
-import { formatDate, monthEnd, monthKey, todayISO } from "../../lib/money/dates";
-import { guessMapping, readRows, type ColumnMapping, type CsvPreset, type ParsedRow, type RowProblem } from "../../lib/money/csv";
+import { formatDate, monthEnd, monthKey, monthLabel, todayISO } from "../../lib/money/dates";
+import { guessMapping, readRows, type BankName, type ColumnMapping, type CsvPreset, type ParsedRow, type RowProblem } from "../../lib/money/csv";
+import { isWaveLedger, ledgerToRows, parseWaveLedger, type LedgerRow, type WaveLedger } from "../../lib/money/wave-ledger";
 import { guessParty, normalizeText, similarity } from "../../lib/money/matching";
 import { monthTitle, quietMonths } from "../../lib/money/insights";
 import { fiscalYearRange, presetRange, previousRange } from "../../lib/money/periods";
@@ -16,7 +17,12 @@ import { supabase } from "../../lib/supabase";
 import { CategoryIcon, Help, Toggle } from "./ui";
 
 type Check = { key: string; status: "new" | "already-imported" | "possible"; reason: string | null; match: { date: string; party: string; totalCents: number; categoryId: string } | null; suggestion: string | null };
-type Item = { row: ParsedRow; key: string; status: Check["status"]; match: Check["match"]; categoryId: string | null; party: string; taxesIncluded: boolean; decision: "keep" | "skip" | null; locked: boolean };
+type Item = { row: ParsedRow; key: string; status: Check["status"]; match: Check["match"]; categoryId: string | null; party: string; taxesIncluded: boolean; decision: "keep" | "skip" | null; locked: boolean;
+  /** Wave General Ledger line: exact GST / QST from the invoice. */
+  ledger?: { gstCents: number; qstCents: number; estimated: boolean } };
+
+const BANK_LABEL: Record<BankName, string> = { desjardins: "Desjardins", national: "Banque Nationale", rbc: "RBC", td: "TD", bmo: "BMO", scotia: "Scotiabank", tangerine: "Tangerine", other: "" };
+const ledgerToParsed = (r: LedgerRow): ParsedRow => ({ line: r.line, date: r.date, kind: r.kind, totalCents: r.totalCents, description: r.description, party: r.party, account: r.account, taxCents: r.gstCents + r.qstCents });
 
 const L = (lang: Lang, en: string, fr: string) => (lang === "fr" ? fr : en);
 
@@ -63,7 +69,7 @@ export function CatchUp({ lang, entries, settings, onAddCash, onGoMonthly }: { l
         {months.map((m) => <span key={m.key} className={`mn-month mn-month-${m.state}`} title={monthTitle(m.key, lang)}>{monthTitle(m.key, lang).replace(/\s\d{4}$/, "").slice(0, 4)}</span>)}
       </div>
       <ol className="mn-steps">
-        {step(hasWave, L(lang, "1. Import your Wave export (money in)", "1. Importez votre export Wave (argent reçu)"), L(lang, "Wave → Accounting → Transactions → Export → CSV. It has your invoices and clients.", "Wave → Comptabilité → Transactions → Exporter → CSV. Il contient vos factures et vos clients."))}
+        {step(hasWave, L(lang, "1. Import your Wave export (money in)", "1. Importez votre export Wave (argent reçu)"), L(lang, "Wave → Reports → Account Transactions (General Ledger) → this year → Export CSV. It has your payments, invoices and clients.", "Wave → Rapports → Transactions du compte (grand livre) → cette année → Exporter CSV. Il contient vos paiements, factures et clients."))}
         {step(hasBank, L(lang, "2. Import your bank statements (money out)", "2. Importez vos relevés bancaires (argent dépensé)"), L(lang, "In your bank's website, download each account as CSV from the first day of your year. Keep “money out only” on if Wave already has your income.", "Sur le site de votre banque, téléchargez chaque compte en CSV depuis le premier jour de votre année. Laissez « argent dépensé seulement » si Wave a déjà vos revenus."))}
         {step(false, L(lang, "3. Add cash spending that isn't in the bank", "3. Ajoutez les dépenses comptant absentes de la banque"), "", <button type="button" className="mn-link" onClick={onAddCash}>{L(lang, "– Money out", "– Argent dépensé")}</button>)}
         {step(done === months.length && months.length > 0, L(lang, "4. Check the Monthly tab", "4. Vérifiez l'onglet Par mois"), L(lang, "Amber months probably have something missing.", "Les mois en orange ont probablement un oubli."), <button type="button" className="mn-link" onClick={onGoMonthly}>{L(lang, "Open Monthly", "Ouvrir Par mois")}</button>)}
@@ -78,12 +84,15 @@ function nextMonth(date: string) {
 }
 
 function Importer({ lang, entries, categories, parties, locks, onImported }: { lang: Lang; entries: MoneyEntry[]; categories: MoneyCategory[]; parties: Party[]; locks: Set<string>; onImported: () => Promise<void> }) {
-  const [step, setStep] = useState<"pick" | "map" | "review" | "done">("pick");
+  const [step, setStep] = useState<"pick" | "map" | "ledger" | "review" | "done">("pick");
   const [source, setSource] = useState<"bank" | "wave">("bank");
   const [fileName, setFileName] = useState("");
   const [raw, setRaw] = useState<string[][]>([]);
   const [preset, setPreset] = useState<CsvPreset>("bank");
   const [mapping, setMapping] = useState<ColumnMapping | null>(null);
+  const [bank, setBank] = useState<BankName>("other");
+  const [ledger, setLedger] = useState<WaveLedger | null>(null);
+  const [cashPick, setCashPick] = useState<string[]>([]);
   const [onlyOut, setOnlyOut] = useState(() => entries.some((e) => !e.deletedAt && e.kind === "in"));
   const [items, setItems] = useState<Item[]>([]);
   const [accountMap, setAccountMap] = useState<Record<string, string>>({});
@@ -97,7 +106,9 @@ function Importer({ lang, entries, categories, parties, locks, onImported }: { l
 
   const parsed: { rows: ParsedRow[]; problems: RowProblem[] } = useMemo(() => (mapping ? readRows(raw, mapping, preset) : { rows: [], problems: [] }), [raw, mapping, preset]);
   const kept = parsed.rows.filter((r) => !(onlyOut && source !== "wave" && r.kind === "in"));
-  const header = mapping?.hasHeader ? raw[0] ?? [] : (raw[0] ?? []).map((_, i) => `${L(lang, "Column", "Colonne")} ${i + 1}`);
+  const ledgerOut = useMemo(() => (ledger ? ledgerToRows(ledger, cashPick) : null), [ledger, cashPick]);
+  const headRow = raw[mapping?.skip ?? 0] ?? [];
+  const header = mapping?.hasHeader ? headRow : headRow.map((_, i) => `${L(lang, "Column", "Colonne")} ${i + 1}`);
 
   const readFile = (file: File) => {
     setError(null);
@@ -108,8 +119,20 @@ function Importer({ lang, entries, categories, parties, locks, onImported }: { l
         const data = (res.data as string[][]).filter((r) => Array.isArray(r));
         if (encoding === "UTF-8" && data.some((r) => r.some((c) => c.includes("�")))) { parse("ISO-8859-1"); return; }
         if (data.length < 1) { setError(L(lang, "This file looks empty.", "Ce fichier semble vide.")); return; }
+        if (isWaveLedger(data)) {
+          try {
+            const parsedLedger = parseWaveLedger(data);
+            setLedger(parsedLedger);
+            setCashPick(parsedLedger.accounts.filter((a) => a.role === "cash").map((a) => a.name));
+            setRaw(data); setPreset("wave"); setSource("wave"); setMapping(null);
+            setStep("ledger");
+          } catch { setError(L(lang, "This Wave report couldn't be read.", "Ce rapport Wave n'a pas pu être lu.")); }
+          return;
+        }
         const guess = guessMapping(data);
+        setLedger(null);
         setRaw(data);
+        setBank(guess.bank);
         setPreset(guess.preset);
         setSource(guess.preset === "wave" ? "wave" : "bank");
         setMapping(guess.mapping);
@@ -121,12 +144,31 @@ function Importer({ lang, entries, categories, parties, locks, onImported }: { l
   };
 
   const runCheck = async () => {
-    if (!kept.length) return;
+    const ledgerRows = ledgerOut?.rows ?? null;
+    if (ledgerRows ? !ledgerRows.length : !kept.length) return;
     setBusy(true); setError(null);
     try {
-      const response = await fetch("/api/money/import", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${await token()}` }, body: JSON.stringify({ action: "check", source: preset === "desjardins" ? "desjardins" : source, rows: kept.map((r) => ({ date: r.date, kind: r.kind, totalCents: r.totalCents, description: r.description, party: r.party })) }) });
+      const sendRows = ledgerRows
+        ? ledgerRows.map((r) => ({ date: r.date, kind: r.kind, totalCents: r.totalCents, description: r.description, party: r.party, key: r.key }))
+        : kept.map((r) => ({ date: r.date, kind: r.kind, totalCents: r.totalCents, description: r.description, party: r.party }));
+      const response = await fetch("/api/money/import", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${await token()}` }, body: JSON.stringify({ action: "check", source: preset === "desjardins" ? "desjardins" : source, rows: sendRows }) });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "error");
+      if (ledgerRows) {
+        // Every line already has its category, client and exact taxes: new lines start ticked.
+        setAccountMap({});
+        setItems(ledgerRows.map((r, i) => {
+          const c: Check = body.results[i];
+          const locked = locks.has(monthKey(r.date));
+          return {
+            row: ledgerToParsed(r), key: c.key, status: c.status, match: c.match, categoryId: valid.has(r.categoryId) ? r.categoryId : null, party: r.party,
+            taxesIncluded: r.gstCents + r.qstCents > 0, ledger: { gstCents: r.gstCents, qstCents: r.qstCents, estimated: r.estimated },
+            decision: locked || c.status === "already-imported" ? "skip" : c.status === "new" && valid.has(r.categoryId) ? "keep" : null, locked,
+          };
+        }));
+        setStep("review");
+        return;
+      }
       const known = [...parties.map((p) => p.name), ...entries.map((e) => e.party).filter(Boolean)];
       // Wave: one category per Wave account, guessed from its name (confirmed below).
       const map: Record<string, string> = {};
@@ -182,7 +224,7 @@ function Importer({ lang, entries, categories, parties, locks, onImported }: { l
     try {
       const response = await fetch("/api/money/import", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${await token()}` }, body: JSON.stringify({
         action: "commit", source: preset === "desjardins" ? "desjardins" : source, fileName,
-        rows: rows.map((it) => ({ date: it.row.date, kind: it.row.kind, totalCents: it.row.totalCents, description: it.row.description, party: it.party, key: it.key, categoryId: it.categoryId, taxesIncluded: it.taxesIncluded, taxCents: preset === "wave" ? it.row.taxCents : null })),
+        rows: rows.map((it) => ({ date: it.row.date, kind: it.row.kind, totalCents: it.row.totalCents, description: it.row.description, party: it.party, key: it.key, categoryId: it.categoryId, taxesIncluded: it.taxesIncluded, taxCents: preset === "wave" && !it.ledger ? it.row.taxCents : null, gstCents: it.ledger?.gstCents ?? null, qstCents: it.ledger?.qstCents ?? null })),
       }) });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error === "month_locked" ? "locked" : "error");
@@ -196,7 +238,7 @@ function Importer({ lang, entries, categories, parties, locks, onImported }: { l
     }
   };
 
-  const reset = () => { setStep("pick"); setRaw([]); setMapping(null); setItems([]); setResult(null); setError(null); if (fileRef.current) fileRef.current.value = ""; };
+  const reset = () => { setStep("pick"); setRaw([]); setMapping(null); setLedger(null); setItems([]); setResult(null); setError(null); setOnlyOut(entries.some((e) => !e.deletedAt && e.kind === "in")); if (fileRef.current) fileRef.current.value = ""; };
   const pending = items.findIndex((it) => it.decision === null);
   const counts = { keep: items.filter((i) => i.decision === "keep").length, skip: items.filter((i) => i.decision === "skip").length, todo: items.filter((i) => i.decision === null).length, ready: items.filter((i) => i.decision === null && i.categoryId).length };
   const sel = (label: string, value: number | null, onChange: (v: number | null) => void, optional = false) => (
@@ -224,7 +266,7 @@ function Importer({ lang, entries, categories, parties, locks, onImported }: { l
 
       {step === "map" && mapping && (
         <div className="mn-map">
-          <p className="mn-muted"><b>{fileName}</b> · {preset === "wave" ? "Wave" : preset === "desjardins" ? "Desjardins" : L(lang, "Bank / card", "Banque / carte")} · {parsed.rows.length} {L(lang, "lines read", "lignes lues")}{parsed.problems.length ? ` · ${parsed.problems.length} ${L(lang, "ignored", "ignorées")}` : ""}</p>
+          <p className="mn-muted"><b>{fileName}</b> · {preset === "wave" ? "Wave" : preset === "desjardins" ? "Desjardins" : BANK_LABEL[bank] || L(lang, "Bank / card", "Banque / carte")} · {parsed.rows.length} {L(lang, "lines read", "lignes lues")}{parsed.problems.length ? ` · ${parsed.problems.length} ${L(lang, "ignored", "ignorées")}` : ""}</p>
           {preset !== "wave" && (
             <div className="mn-map-grid">
               {sel(L(lang, "Date", "Date"), mapping.date, (v) => setMapping({ ...mapping, date: v ?? 0 }))}
@@ -256,6 +298,8 @@ function Importer({ lang, entries, categories, parties, locks, onImported }: { l
           </div>
         </div>
       )}
+
+      {step === "ledger" && ledger && ledgerOut && <LedgerStep lang={lang} fileName={fileName} ledger={ledger} result={ledgerOut} cashPick={cashPick} onCashPick={setCashPick} busy={busy} onBack={reset} onCheck={() => void runCheck()} />}
 
       {step === "review" && (
         <div className="mn-review">
@@ -315,6 +359,92 @@ function Importer({ lang, entries, categories, parties, locks, onImported }: { l
         </div>
       )}
     </section>
+  );
+}
+
+/** Wave General Ledger: which accounts are cash, and a month-by-month dry run before anything is checked or saved. */
+function LedgerStep({ lang, fileName, ledger, result, cashPick, onCashPick, busy, onBack, onCheck }: {
+  lang: Lang; fileName: string; ledger: WaveLedger; result: ReturnType<typeof ledgerToRows>; cashPick: string[]; onCashPick: (v: string[]) => void; busy: boolean; onBack: () => void; onCheck: () => void;
+}) {
+  const $ = (c: number) => formatMoney(c, lang);
+  const sum = (f: (m: (typeof result.months)[number]) => number) => result.months.reduce((s, m) => s + f(m), 0);
+  const ins = result.rows.filter((r) => r.kind === "in");
+  const gst = ins.reduce((s, r) => s + r.gstCents, 0);
+  const qst = ins.reduce((s, r) => s + r.qstCents, 0);
+  const count = (t: string) => result.notes.filter((n) => n.type === t).length;
+  const roleName: Record<string, [string, string]> = {
+    receivable: ["invoice totals", "totaux des factures"], sales: ["what each invoice was for", "le détail de chaque facture"], gst: ["GST per invoice", "TPS par facture"], qst: ["QST per invoice", "TVQ par facture"],
+    merchant_fees: ["card fees", "frais de carte"], customer_credits: ["deposits", "dépôts"], invoice_charge: ["invoice surcharge", "frais ajoutés aux factures"], other: ["not used", "non utilisé"],
+  };
+  const cashAccounts = ledger.accounts.filter((a) => a.role === "cash" || cashPick.includes(a.name));
+  const helpers = ledger.accounts.filter((a) => !cashAccounts.includes(a));
+  const monthName = (m: string) => `${monthLabel(Number(m.slice(5, 7)), lang)} ${m.slice(0, 4)}`;
+  return (
+    <div className="mn-map mn-ledger">
+      <p className="mn-muted"><b>{fileName}</b> · Wave · {L(lang, "General Ledger", "Grand livre")}{ledger.from && ledger.to ? ` · ${formatDate(ledger.from, lang, { year: true })} – ${formatDate(ledger.to, lang, { year: true })}` : ""}</p>
+      <p className="mn-ledger-explain">{L(lang,
+        "Only money that actually came in or went out of these accounts is counted, so each payment counts once. The other accounts are only used to split each payment into labour, parts and service calls with its exact GST and QST.",
+        "Seul l'argent réellement entré ou sorti de ces comptes est compté : chaque paiement compte une seule fois. Les autres comptes servent seulement à répartir chaque paiement (main-d'œuvre, pièces, appels de service) avec sa TPS et sa TVQ exactes.")}</p>
+      <div className="mn-map-toggles">
+        {cashAccounts.map((a) => (
+          <Toggle key={a.name} checked={cashPick.includes(a.name)} onChange={(v) => onCashPick(v ? [...cashPick, a.name] : cashPick.filter((n) => n !== a.name))}
+            label={`${a.name} · ${a.lines} ${L(lang, "lines", "lignes")}`} />
+        ))}
+      </div>
+      <small className="mn-muted">{L(lang, "Used for details:", "Utilisés pour les détails :")} {helpers.map((a) => `${a.name} (${L(lang, ...(roleName[a.role] ?? roleName.other))})`).join(" · ")}</small>
+
+      <p className="mn-review-sum">
+        <span><b>{result.rows.length}</b> {L(lang, "entries", "entrées")}</span>
+        <span><b className="mn-in">{$(sum((m) => m.inCents))}</b> {L(lang, "money in", "reçu")} ({$(sum((m) => m.inNetCents))} {L(lang, "before taxes", "avant taxes")})</span>
+        <span><b className="mn-out">{$(sum((m) => m.outCents))}</b> {L(lang, "money out", "dépensé")}</span>
+        <span>{L(lang, "GST", "TPS")} <b>{$(gst)}</b> · {L(lang, "QST", "TVQ")} <b>{$(qst)}</b></span>
+      </p>
+      <div className="mn-st-scroll">
+        <table className="mn-mini-table mn-ledger-table">
+          <thead><tr>
+            <th scope="col">{L(lang, "Month", "Mois")}</th><th scope="col">{L(lang, "Entries", "Entrées")}</th>
+            <th scope="col">{L(lang, "Money in", "Reçu")}</th><th scope="col">{L(lang, "Before taxes", "Avant taxes")}</th><th scope="col">{L(lang, "Wave sales (P&L)", "Ventes Wave (É.R.)")}</th>
+            <th scope="col">{L(lang, "Money out", "Dépensé")}</th><th scope="col">{L(lang, "Wave expenses (P&L)", "Dépenses Wave (É.R.)")}</th>
+          </tr></thead>
+          <tbody>
+            {result.months.map((m) => (
+              <tr key={m.month}>
+                <th scope="row">{monthName(m.month)}</th><td>{m.inCount + m.outCount}</td>
+                <td className="mn-in">{$(m.inCents)}</td><td>{$(m.inNetCents)}</td><td>{$(m.waveIncomeCents)}</td>
+                <td className="mn-out">{$(m.outCents)}</td><td>{$(m.waveFeesCents)}</td>
+              </tr>
+            ))}
+            <tr className="mn-total-row">
+              <th scope="row">{L(lang, "Total", "Total")}</th><td>{result.rows.length}</td>
+              <td className="mn-in">{$(sum((m) => m.inCents))}</td><td>{$(sum((m) => m.inNetCents))}</td><td>{$(sum((m) => m.waveIncomeCents))}</td>
+              <td className="mn-out">{$(sum((m) => m.outCents))}</td><td>{$(sum((m) => m.waveFeesCents))}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="mn-muted mn-ledger-explain">{L(lang,
+        "Why months differ from Wave: Wave's Profit & Loss counts an invoice when it's sent; Money counts it when you're paid. Money out here is Wave's card fees, added back so “money in” is what clients actually paid.",
+        "Pourquoi les mois diffèrent de Wave : l'état des résultats de Wave compte une facture quand elle est envoyée; Argent la compte quand vous êtes payé. L'argent dépensé ici, ce sont les frais de carte de Wave, rajoutés pour que « reçu » soit ce que les clients ont vraiment payé.")}</p>
+      {result.notes.length > 0 && (
+        <details className="mn-review-list">
+          <summary>{[
+            count("reversal") && L(lang, `${count("reversal")} payment(s) taken back, not counted`, `${count("reversal")} paiement(s) annulé(s), non comptés`),
+            count("refund-netted") && L(lang, `${count("refund-netted")} refund(s) taken off their payment`, `${count("refund-netted")} remboursement(s) déduit(s) du paiement`),
+            count("no-invoice") && L(lang, `${count("no-invoice")} payment(s) without invoice details: standard taxes assumed`, `${count("no-invoice")} paiement(s) sans détail de facture : taxes standard`),
+            count("transfer") && L(lang, `${count("transfer")} transfer(s) between accounts ignored`, `${count("transfer")} virement(s) entre comptes ignoré(s)`),
+            count("refund") && L(lang, `${count("refund")} refund(s) logged as money out`, `${count("refund")} remboursement(s) inscrit(s) comme dépense`),
+          ].filter(Boolean).join(" · ")}</summary>
+          <ul className="mn-plain-list">
+            {result.notes.map((n, i) => <li key={i} className="mn-review-row"><span className="mn-review-date">{n.date}</span><span className="mn-review-desc">{n.description} · {n.account}</span><span className="mn-amount">{$(n.cents)}</span></li>)}
+          </ul>
+        </details>
+      )}
+      <p className="mn-muted">{L(lang, "Nothing is saved yet. Next: a duplicate check against what's already in Money.", "Rien n'est encore enregistré. Ensuite : vérification des doublons avec ce qui est déjà dans Argent.")}</p>
+      <div className="mn-form-actions mn-inline-actions">
+        <button type="button" className="mn-ghost" onClick={onBack}><ArrowLeft size={15} />{L(lang, "Another file", "Autre fichier")}</button>
+        <button type="button" className="mn-primary" disabled={busy || !result.rows.length} onClick={onCheck}>{busy ? mt2(lang) : `${L(lang, "Check", "Vérifier")} ${result.rows.length} ${L(lang, "entries", "entrées")}`}</button>
+      </div>
+    </div>
   );
 }
 
