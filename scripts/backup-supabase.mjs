@@ -37,5 +37,28 @@ for (const table of tables) {
     console.error(`${table}: FAILED — ${error.message}`);
   }
 }
+// Money / Argent tables (every money_* table, found automatically), straight from the database.
+if (process.env.SUPABASE_DB_URL) {
+  const { default: pg } = await import("pg");
+  const db = new pg.Client({ connectionString: process.env.SUPABASE_DB_URL, ssl: { rejectUnauthorized: false } });
+  await db.connect();
+  try {
+    const found = (await db.query(`select tablename from pg_tables where schemaname = 'public' and tablename like 'money\\_%' order by 1`)).rows.map((r) => r.tablename);
+    for (const table of found) {
+      try {
+        const { rows } = await db.query(`select * from public.${table}`);
+        await writeFile(join(dir, `${table}.json`), JSON.stringify(rows, null, 2));
+        console.log(`${table}: ${rows.length} rows`);
+      } catch (error) {
+        failed = true;
+        console.error(`${table}: FAILED — ${error.message}`);
+      }
+    }
+  } finally {
+    await db.end();
+  }
+} else {
+  console.warn("Warning: SUPABASE_DB_URL is missing, so the Money tables were NOT backed up.");
+}
 console.log(`Backup written to ${dir}`);
 if (failed) process.exit(1);
