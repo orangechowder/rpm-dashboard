@@ -110,20 +110,28 @@ const KEYWORD_CATEGORIES: Array<[RegExp, string]> = [
 ];
 
 /** Suggest a category: remembered supplier/client first, then the last entry with that name, then keywords. */
-export function suggestCategory(text: string, kind: MoneyKind, memory: PartyMemory[], history: MoneyEntry[], validIds: Set<string>): string | null {
-  const normalized = normalizeText(text);
-  if (!normalized) return null;
+/** A category the person already chose for this supplier/client (memory, then past entries). Not a guess. */
+export function rememberedCategory(text: string, kind: MoneyKind, memory: PartyMemory[], history: MoneyEntry[], validIds: Set<string>): string | null {
+  if (!normalizeText(text)) return null;
   const remembered = memory
     .filter((party) => party.categoryId && validIds.has(party.categoryId) && similarity(party.name, text) >= 0.99 && tokens(party.name).length)
     .sort((a, b) => tokens(b.name).length - tokens(a.name).length)[0];
   if (remembered) return remembered.categoryId;
   const previous = history.find((entry) => !entry.deletedAt && entry.kind === kind && entry.party && similarity(entry.party, text) >= 0.99);
   if (previous && validIds.has(previous.categoryId)) return previous.categoryId;
-  if (kind === "out") {
-    const ascii = ` ${normalized} `;
-    for (const [pattern, id] of KEYWORD_CATEGORIES) if (pattern.test(ascii) && validIds.has(id)) return id;
-  }
   return null;
+}
+
+/** A guess from well-known names in the text ("PETRO-CAN" → Fuel). Only ever a suggestion. */
+export function keywordCategory(text: string, kind: MoneyKind, validIds: Set<string>): string | null {
+  if (kind !== "out") return null;
+  const ascii = ` ${normalizeText(text)} `;
+  for (const [pattern, id] of KEYWORD_CATEGORIES) if (pattern.test(ascii) && validIds.has(id)) return id;
+  return null;
+}
+
+export function suggestCategory(text: string, kind: MoneyKind, memory: PartyMemory[], history: MoneyEntry[], validIds: Set<string>): string | null {
+  return rememberedCategory(text, kind, memory, history, validIds) ?? keywordCategory(text, kind, validIds);
 }
 
 /** Best display name for a bank line ("PETRO-CANADA #1234 MTL" → "Petro-Canada"), using known names first. */

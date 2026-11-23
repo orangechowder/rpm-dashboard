@@ -65,7 +65,7 @@ export type AttentionItem =
   | { type: "unpaid-bill"; entry: MoneyEntry }
   | { type: "quiet-month"; month: string; expenseCents: Cents; typicalCents: Cents };
 
-export function needsAttention(entries: MoneyEntry[], rules: RecurringRule[], categories: MoneyCategory[], today: ISODate, options: { receiptLookbackDays?: number } = {}): AttentionItem[] {
+export function needsAttention(entries: MoneyEntry[], rules: RecurringRule[], categories: MoneyCategory[], today: ISODate, options: { receiptLookbackDays?: number; receipts?: boolean } = {}): AttentionItem[] {
   const items: AttentionItem[] = [];
   const needsReceipt = new Set(categories.filter((c) => c.needsReceipt).map((c) => c.id));
   const lookback = addDays(today, -(options.receiptLookbackDays ?? 90));
@@ -76,7 +76,8 @@ export function needsAttention(entries: MoneyEntry[], rules: RecurringRule[], ca
       if (days > 30) items.push({ type: "unpaid", entry, days });
     }
     if (entry.kind === "out" && !entry.paid && entry.date <= addDays(today, 7)) items.push({ type: "unpaid-bill", entry });
-    if (entry.kind === "out" && !entry.receiptPath && needsReceipt.has(entry.categoryId) && entry.date >= lookback && entry.date <= today) items.push({ type: "receipt", entry });
+    // Receipt photos are turned off: no "missing receipt" reminders (options.receipts re-enables them).
+    if (options.receipts && entry.kind === "out" && !entry.receiptPath && needsReceipt.has(entry.categoryId) && entry.date >= lookback && entry.date <= today) items.push({ type: "receipt", entry });
   }
   for (const rule of rules) {
     if (rule.deletedAt || rule.paused) continue;

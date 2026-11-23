@@ -1,4 +1,5 @@
 "use client";
+import { waveAttentionText, type WaveAttention } from "./wave-panel";
 
 import { useEffect, useMemo, useState } from "react";
 import { ArrowDownRight, ArrowUpRight, CalendarClock, CircleCheck, Paperclip, Receipt, TriangleAlert } from "lucide-react";
@@ -18,7 +19,7 @@ import { Amount, Empty, Help, Skeleton } from "./ui";
 export type PeriodState = { preset: PeriodPreset; custom: DateRange };
 
 export function OverviewTab({
-  lang, entries, categories, settings, rules, loading, period, onPeriod, onOpenEntry, onMarkPaid, onGo, extraCards,
+  lang, entries, categories, settings, rules, loading, period, onPeriod, onOpenEntry, onMarkPaid, onGo, extraCards, waveItems = [], onWaveAction,
 }: {
   lang: Lang;
   entries: MoneyEntry[];
@@ -30,8 +31,10 @@ export function OverviewTab({
   onPeriod: (p: PeriodState) => void;
   onOpenEntry: (entry: MoneyEntry) => void;
   onMarkPaid: (entry: MoneyEntry) => void;
-  onGo: (tab: "bills" | "monthly" | "import" | "log-receipts", month?: string) => void;
+  onGo: (tab: GoTarget, month?: string) => void;
   extraCards?: React.ReactNode;
+  waveItems?: WaveAttention[];
+  onWaveAction?: (item: WaveAttention, action: "add" | "ignore") => void;
 }) {
   const theme = useChartTheme();
   const today = todayISO();
@@ -103,7 +106,7 @@ export function OverviewTab({
       {loading ? <Skeleton height={22} width="70%" /> : <p className="mn-sentence">{sentence}</p>}
 
       <div className="mn-overview-grid">
-        <Attention lang={lang} items={attention} byId={byId} onOpenEntry={onOpenEntry} onMarkPaid={onMarkPaid} onGo={onGo} />
+        <Attention lang={lang} items={attention} byId={byId} onOpenEntry={onOpenEntry} onMarkPaid={onMarkPaid} onGo={onGo} waveItems={waveItems} onWaveAction={onWaveAction} />
         <RealProfitCard lang={lang} data={labourReady?.value ?? null} error={Boolean(labourReady?.error)} loading={loading || !labourReady} />
         {extraCards}
       </div>
@@ -175,7 +178,9 @@ function RealProfitCard({ lang, data, loading, error }: { lang: Lang; data: Real
 
 const PRIORITY: Record<AttentionItem["type"], number> = { unpaid: 0, "bill-due": 1, "unpaid-bill": 2, "quiet-month": 3, receipt: 4 };
 
-function Attention({ lang, items: raw, byId, onOpenEntry, onMarkPaid, onGo }: { lang: Lang; items: AttentionItem[]; byId: Map<string, MoneyCategory>; onOpenEntry: (e: MoneyEntry) => void; onMarkPaid: (e: MoneyEntry) => void; onGo: (tab: "bills" | "monthly" | "import" | "log-receipts", month?: string) => void }) {
+export type GoTarget = "bills" | "monthly" | "import" | "log-receipts" | "settings";
+
+function Attention({ lang, items: raw, byId, onOpenEntry, onMarkPaid, onGo, waveItems, onWaveAction }: { lang: Lang; items: AttentionItem[]; byId: Map<string, MoneyCategory>; onOpenEntry: (e: MoneyEntry) => void; onMarkPaid: (e: MoneyEntry) => void; onGo: (tab: GoTarget, month?: string) => void; waveItems: WaveAttention[]; onWaveAction?: (item: WaveAttention, action: "add" | "ignore") => void }) {
   const [all, setAll] = useState(false);
   const receipts = raw.filter((i) => i.type === "receipt");
   // Most important first; many missing receipts collapse into one line that opens the filtered list.
@@ -188,9 +193,23 @@ function Attention({ lang, items: raw, byId, onOpenEntry, onMarkPaid, onGo }: { 
   const name = (e: MoneyEntry) => e.party || (byId.get(e.categoryId)?.[lang === "fr" ? "fr" : "en"] ?? "—");
   return (
     <section className="mn-card mn-attention">
-      <h3>{mt(lang, "needsAttention")} {raw.length > 0 && <span className="mn-count">{raw.length}</span>} <Help lang={lang} topic="needsAttention" /></h3>
-      {!raw.length ? <p className="mn-all-good"><CircleCheck size={18} aria-hidden="true" />{mt(lang, "allGood")}</p> : (
+      <h3>{mt(lang, "needsAttention")} {raw.length + waveItems.length > 0 && <span className="mn-count">{raw.length + waveItems.length}</span>} <Help lang={lang} topic="needsAttention" /></h3>
+      {!raw.length && !waveItems.length ? <p className="mn-all-good"><CircleCheck size={18} aria-hidden="true" />{mt(lang, "allGood")}</p> : (
         <ul className="mn-plain-list">
+          {waveItems.map((item) => {
+            const t = waveAttentionText(item, lang, (id) => byId.get(id)?.[lang === "fr" ? "fr" : "en"] ?? "");
+            const fr = lang === "fr";
+            return (
+              <li key={`w${item.ref}`} className="mn-att-row mn-att-wave"><TriangleAlert size={16} className="mn-att-icon mn-att-warn" aria-hidden="true" />
+                <span className="mn-att-text"><b>{t.title}</b><small>Wave · {t.detail}</small></span>
+                <span className="mn-att-actions">
+                  {item.kind === "unmatched" && <button type="button" className="mn-ghost" onClick={() => onWaveAction?.(item, "add")}>{fr ? "L'ajouter" : "Add it"}</button>}
+                  {(item.kind === "unmapped" || item.kind === "connection") && <button type="button" className="mn-ghost" onClick={() => onGo("settings")}>{mt(lang, "open")}</button>}
+                  {(item.kind === "closed-month" || item.kind === "gap") && <button type="button" className="mn-ghost" onClick={() => onGo("monthly", String(item.kind === "gap" ? item.title : ((item.details.after ?? item.details.before) as { date?: string } | null)?.date ?? "").slice(0, 7))}>{mt(lang, "open")}</button>}
+                  {item.kind !== "connection" && item.kind !== "unmapped" && <button type="button" className="mn-link" onClick={() => onWaveAction?.(item, "ignore")}>{fr ? "Ignorer" : "Ignore"}</button>}
+                </span></li>
+            );
+          })}
           {shown.map((item, index) => {
             if (item.type === "unpaid") return (
               <li key={`u${item.entry.id}`} className="mn-att-row"><TriangleAlert size={16} className="mn-att-icon mn-att-warn" aria-hidden="true" />

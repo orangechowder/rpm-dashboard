@@ -1,13 +1,13 @@
 // "Send to my accountant" (Admins only): GET /api/money/export?format=xlsx|pdf&start=YYYY-MM-DD&end=YYYY-MM-DD&lang=en|fr
 // Reads with the caller's own session (RLS applies); never cached.
 import { isISODate } from "../../../../lib/money/dates";
-import { rowToEntry } from "../../../../lib/money/rows";
+import { rowToEntry, toTaxMode } from "../../../../lib/money/rows";
 import { DEFAULT_SETTINGS, type MoneyCategory, type MoneySettings } from "../../../../lib/money/types";
 import { buildPdf, buildWorkbook } from "../../../../lib/server/money-report";
 import { bearerToken, jsonError, requireStaff, userClient } from "../../../../lib/server/staff-auth";
 
 export const runtime = "nodejs";
-const ENTRY_COLUMNS = "id,kind,entry_date,category_id,party_name,description,total_cents,gst_cents,qst_cents,net_cents,taxes_included,payment_method,paid,paid_on,receipt_path,recurring_id,occurrence_date,source,import_key,created_by,created_at,updated_by,updated_at,deleted_at,deleted_by";
+const ENTRY_COLUMNS = "id,kind,entry_date,category_id,party_name,description,total_cents,gst_cents,qst_cents,net_cents,taxes_included,payment_method,paid,paid_on,receipt_path,receipt_ref,recurring_id,occurrence_date,source,import_key,created_by,created_at,updated_by,updated_at,deleted_at,deleted_by";
 
 export async function GET(request: Request) {
   const caller = await requireStaff(request, { admin: true });
@@ -28,11 +28,11 @@ export async function GET(request: Request) {
     if (!data || data.length < 1000) break;
   }
   const [{ data: cats, error: catError }, { data: set }] = await Promise.all([
-    db.from("money_categories").select("id,kind,name_en,name_fr,icon,sort_order,needs_receipt,taxable_default,active").order("sort_order"),
+    db.from("money_categories").select("id,kind,name_en,name_fr,icon,sort_order,needs_receipt,taxable_default,tax_mode,active").order("sort_order"),
     db.from("money_settings").select("fiscal_year_start_month,tax_frequency,gst_number,qst_number").eq("id", 1).maybeSingle(),
   ]);
   if (catError) return jsonError(500, "lookup_failed", catError.message);
-  const categories: MoneyCategory[] = (cats ?? []).map((r) => ({ id: String(r.id), kind: r.kind === "in" ? "in" : "out", en: String(r.name_en), fr: String(r.name_fr), icon: String(r.icon), sortOrder: Number(r.sort_order), needsReceipt: Boolean(r.needs_receipt), taxable: Boolean(r.taxable_default), active: Boolean(r.active) }));
+  const categories: MoneyCategory[] = (cats ?? []).map((r) => ({ id: String(r.id), kind: r.kind === "in" ? "in" : "out", en: String(r.name_en), fr: String(r.name_fr), icon: String(r.icon), sortOrder: Number(r.sort_order), needsReceipt: Boolean(r.needs_receipt), taxable: Boolean(r.taxable_default), taxMode: toTaxMode(r.tax_mode, Boolean(r.taxable_default)), active: Boolean(r.active) }));
   const settings: MoneySettings = set ? { ...DEFAULT_SETTINGS, fiscalYearStartMonth: Number(set.fiscal_year_start_month) || 1, taxFrequency: set.tax_frequency as MoneySettings["taxFrequency"], gstNumber: String(set.gst_number ?? ""), qstNumber: String(set.qst_number ?? "") } : DEFAULT_SETTINGS;
 
   const input = { lang: lang as "en" | "fr", range: { start, end }, entries, categories, settings, generatedBy: caller.name };

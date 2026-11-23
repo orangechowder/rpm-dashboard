@@ -6,6 +6,7 @@ import { ArrowLeft, Check, CircleCheck, FileDown, FileSpreadsheet, FileText, Upl
 import { formatMoney, type Lang } from "../../lib/money/cents";
 import { formatDate, monthEnd, monthKey, monthLabel, todayISO } from "../../lib/money/dates";
 import { guessMapping, readRows, type BankName, type ColumnMapping, type CsvPreset, type ParsedRow, type RowProblem } from "../../lib/money/csv";
+import { BankReview, type BankCheck, type BankItem, type BankResult } from "./bank-review";
 import { isWaveLedger, ledgerToRows, parseWaveLedger, type LedgerRow, type WaveLedger } from "../../lib/money/wave-ledger";
 import { guessParty, normalizeText, similarity } from "../../lib/money/matching";
 import { monthTitle, quietMonths } from "../../lib/money/insights";
@@ -55,7 +56,7 @@ export function CatchUp({ lang, entries, settings, onAddCash, onGoMonthly }: { l
     const key = cursor.slice(0, 7);
     months.push({ key, state: s.expenseCents === 0 && s.incomeCents === 0 ? "empty" : s.expenseCents === 0 || quiet.has(key) ? "low" : "ok" });
   }
-  const hasWave = entries.some((e) => e.source === "import" && e.importKey?.startsWith("wave|"));
+  const hasWave = entries.some((e) => e.source === "wave" || (e.source === "import" && e.importKey?.startsWith("wave|")));
   const hasBank = entries.some((e) => e.source === "import" && !e.importKey?.startsWith("wave|"));
   const done = months.filter((m) => m.state === "ok").length;
   const step = (ok: boolean, title: string, text: string, action?: React.ReactNode) => (
@@ -70,7 +71,7 @@ export function CatchUp({ lang, entries, settings, onAddCash, onGoMonthly }: { l
       </div>
       <ol className="mn-steps">
         {step(hasWave, L(lang, "1. Import your Wave export (money in)", "1. Importez votre export Wave (argent reçu)"), L(lang, "Wave → Reports → Account Transactions (General Ledger) → this year → Export CSV. It has your payments, invoices and clients.", "Wave → Rapports → Transactions du compte (grand livre) → cette année → Exporter CSV. Il contient vos paiements, factures et clients."))}
-        {step(hasBank, L(lang, "2. Import your bank statements (money out)", "2. Importez vos relevés bancaires (argent dépensé)"), L(lang, "In your bank's website, download each account as CSV from the first day of your year. Keep “money out only” on if Wave already has your income.", "Sur le site de votre banque, téléchargez chaque compte en CSV depuis le premier jour de votre année. Laissez « argent dépensé seulement » si Wave a déjà vos revenus."))}
+        {step(hasBank, L(lang, "2. Import your bank statements (money out)", "2. Importez vos relevés bancaires (argent dépensé)"), L(lang, "In your bank's website, download each account as CSV from the first day of your year. Keep “My income comes from Wave” on: transfers, card payments, Wave payouts and tax payments are recognized for you.", "Sur le site de votre banque, téléchargez chaque compte en CSV depuis le premier jour de votre année. Laissez « Mes revenus viennent de Wave » activé : virements, paiements de carte, versements Wave et remises de taxes sont reconnus pour vous."))}
         {step(false, L(lang, "3. Add cash spending that isn't in the bank", "3. Ajoutez les dépenses comptant absentes de la banque"), "", <button type="button" className="mn-link" onClick={onAddCash}>{L(lang, "– Money out", "– Argent dépensé")}</button>)}
         {step(done === months.length && months.length > 0, L(lang, "4. Check the Monthly tab", "4. Vérifiez l'onglet Par mois"), L(lang, "Amber months probably have something missing.", "Les mois en orange ont probablement un oubli."), <button type="button" className="mn-link" onClick={onGoMonthly}>{L(lang, "Open Monthly", "Ouvrir Par mois")}</button>)}
       </ol>
@@ -84,7 +85,7 @@ function nextMonth(date: string) {
 }
 
 function Importer({ lang, entries, categories, parties, locks, onImported }: { lang: Lang; entries: MoneyEntry[]; categories: MoneyCategory[]; parties: Party[]; locks: Set<string>; onImported: () => Promise<void> }) {
-  const [step, setStep] = useState<"pick" | "map" | "ledger" | "review" | "done">("pick");
+  const [step, setStep] = useState<"pick" | "map" | "ledger" | "bank" | "review" | "done">("pick");
   const [source, setSource] = useState<"bank" | "wave">("bank");
   const [fileName, setFileName] = useState("");
   const [raw, setRaw] = useState<string[][]>([]);
@@ -95,6 +96,8 @@ function Importer({ lang, entries, categories, parties, locks, onImported }: { l
   const [cashPick, setCashPick] = useState<string[]>([]);
   const [onlyOut, setOnlyOut] = useState(() => entries.some((e) => !e.deletedAt && e.kind === "in"));
   const [items, setItems] = useState<Item[]>([]);
+  const [bankItems, setBankItems] = useState<BankItem[]>([]);
+  const [bankResult, setBankResult] = useState<BankResult | null>(null);
   const [accountMap, setAccountMap] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -145,15 +148,25 @@ function Importer({ lang, entries, categories, parties, locks, onImported }: { l
 
   const runCheck = async () => {
     const ledgerRows = ledgerOut?.rows ?? null;
-    if (ledgerRows ? !ledgerRows.length : !kept.length) return;
+    const bankFlow = !ledgerRows && preset !== "wave";
+    const bankRows = parsed.rows;
+    if (ledgerRows ? !ledgerRows.length : bankFlow ? !bankRows.length : !kept.length) return;
     setBusy(true); setError(null);
     try {
       const sendRows = ledgerRows
         ? ledgerRows.map((r) => ({ date: r.date, kind: r.kind, totalCents: r.totalCents, description: r.description, party: r.party, key: r.key }))
-        : kept.map((r) => ({ date: r.date, kind: r.kind, totalCents: r.totalCents, description: r.description, party: r.party }));
-      const response = await fetch("/api/money/import", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${await token()}` }, body: JSON.stringify({ action: "check", source: preset === "desjardins" ? "desjardins" : source, rows: sendRows }) });
+        : (bankFlow ? bankRows : kept).map((r) => ({ date: r.date, kind: r.kind, totalCents: r.totalCents, description: r.description, party: r.party }));
+      const response = await fetch("/api/money/import", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${await token()}` }, body: JSON.stringify({ action: "check", source: preset === "desjardins" ? "desjardins" : source, rows: sendRows, bank: bankFlow, incomeFromWave: onlyOut }) });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "error");
+      if (bankFlow) {
+        setBankItems(bankRows.map((row, i) => {
+          const c: BankCheck = body.results[i];
+          return { ...c, row, locked: locks.has(monthKey(row.date)), original: c.treatment, remember: false };
+        }));
+        setStep("bank");
+        return;
+      }
       if (ledgerRows) {
         // Every line already has its category, client and exact taxes: new lines start ticked.
         setAccountMap({});
@@ -238,7 +251,25 @@ function Importer({ lang, entries, categories, parties, locks, onImported }: { l
     }
   };
 
-  const reset = () => { setStep("pick"); setRaw([]); setMapping(null); setLedger(null); setItems([]); setResult(null); setError(null); setOnlyOut(entries.some((e) => !e.deletedAt && e.kind === "in")); if (fileRef.current) fileRef.current.value = ""; };
+  const commitBank = async (payload: { rows: Array<Record<string, unknown>>; rules: Array<Record<string, unknown>> }) => {
+    setBusy(true); setError(null);
+    try {
+      const response = await fetch("/api/money/import", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${await token()}` }, body: JSON.stringify({
+        action: "commit", source: preset === "desjardins" ? "desjardins" : "bank", fileName, rows: payload.rows, rules: payload.rules,
+      }) });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error === "month_locked" ? "locked" : "error");
+      setBankResult({ created: body.created ?? 0, billsPaid: body.billsPaid ?? 0, billsInClosedMonths: body.billsInClosedMonths ?? [], taxFilings: body.taxFilings ?? 0, rulesSaved: body.rulesSaved ?? 0 });
+      setStep("done");
+      await onImported();
+    } catch (e) {
+      setError(e instanceof Error && e.message === "locked" ? L(lang, "Some lines are in a closed month. Reopen it or skip those lines.", "Certaines lignes sont dans un mois fermé. Rouvrez-le ou sautez ces lignes.") : L(lang, "Saving didn't work. Nothing was imported. Try again.", "L'enregistrement n'a pas fonctionné. Rien n'a été importé. Réessayez."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reset = () => { setBankItems([]); setBankResult(null); setStep("pick"); setRaw([]); setMapping(null); setLedger(null); setItems([]); setResult(null); setError(null); setOnlyOut(entries.some((e) => !e.deletedAt && e.kind === "in")); if (fileRef.current) fileRef.current.value = ""; };
   const pending = items.findIndex((it) => it.decision === null);
   const counts = { keep: items.filter((i) => i.decision === "keep").length, skip: items.filter((i) => i.decision === "skip").length, todo: items.filter((i) => i.decision === null).length, ready: items.filter((i) => i.decision === null && i.categoryId).length };
   const sel = (label: string, value: number | null, onChange: (v: number | null) => void, optional = false) => (
@@ -283,7 +314,7 @@ function Importer({ lang, entries, categories, parties, locks, onImported }: { l
           )}
           <div className="mn-map-toggles">
             {preset !== "wave" && <Toggle checked={mapping.flipSigns} onChange={(v) => setMapping({ ...mapping, flipSigns: v })} label={L(lang, "Swap money in / out (credit cards)", "Inverser reçu / dépensé (cartes de crédit)")} />}
-            {preset !== "wave" && <Toggle checked={onlyOut} onChange={setOnlyOut} label={L(lang, "Money out only (Wave already has my income)", "Argent dépensé seulement (Wave a déjà mes revenus)")} />}
+            {preset !== "wave" && <Toggle checked={onlyOut} onChange={setOnlyOut} label={L(lang, "My income comes from Wave (don't count money in from this file)", "Mes revenus viennent de Wave (ne pas compter l'argent reçu de ce fichier)")} />}
             <Toggle checked={mapping.hasHeader} onChange={(v) => setMapping({ ...mapping, hasHeader: v })} label={L(lang, "First line is titles", "La première ligne contient les titres")} />
           </div>
           <div className="mn-st-scroll">
@@ -300,6 +331,23 @@ function Importer({ lang, entries, categories, parties, locks, onImported }: { l
       )}
 
       {step === "ledger" && ledger && ledgerOut && <LedgerStep lang={lang} fileName={fileName} ledger={ledger} result={ledgerOut} cashPick={cashPick} onCashPick={setCashPick} busy={busy} onBack={reset} onCheck={() => void runCheck()} />}
+
+      {step === "bank" && (
+        <BankReview lang={lang} fileName={fileName} items={bankItems} setItems={setBankItems} categories={categories} busy={busy}
+          onCancel={reset} onSave={(payload) => void commitBank(payload)} />
+      )}
+      {step === "done" && bankResult && (
+        <div className="mn-done">
+          <p className="mn-all-good"><CircleCheck size={20} />{L(lang, "Saved.", "Enregistré.")}</p>
+          <ul className="mn-plain-list mn-bank-done">
+            <li>{L(lang, `${bankResult.created} new expenses`, `${bankResult.created} nouvelles dépenses`)}</li>
+            <li>{L(lang, `${bankResult.billsPaid} bills marked paid`, `${bankResult.billsPaid} factures marquées payées`)}{bankResult.billsInClosedMonths.length ? L(lang, ` (${bankResult.billsInClosedMonths.length} in closed months left as they were)`, ` (${bankResult.billsInClosedMonths.length} dans des mois fermés, laissées telles quelles)`) : ""}</li>
+            <li>{L(lang, `${bankResult.taxFilings} tax periods marked “sent”`, `${bankResult.taxFilings} périodes de taxes marquées « remises »`)}</li>
+            {bankResult.rulesSaved > 0 && <li>{L(lang, `${bankResult.rulesSaved} choices remembered for next time`, `${bankResult.rulesSaved} choix mémorisés pour la prochaine fois`)}</li>}
+          </ul>
+          <button type="button" className="mn-ghost" onClick={reset}>{L(lang, "Import another file", "Importer un autre fichier")}</button>
+        </div>
+      )}
 
       {step === "review" && (
         <div className="mn-review">
@@ -351,7 +399,7 @@ function Importer({ lang, entries, categories, parties, locks, onImported }: { l
         </div>
       )}
 
-      {step === "done" && result && (
+      {step === "done" && result && !bankResult && (
         <div className="mn-done">
           <p className="mn-all-good"><CircleCheck size={20} />{L(lang, `${result.created} entries imported. ${result.skipped} skipped.`, `${result.created} entrées importées. ${result.skipped} sautées.`)}</p>
           <p className="mn-muted">{L(lang, "Suppliers you confirmed are remembered: next time their category is picked for you.", "Les fournisseurs confirmés sont mémorisés : la prochaine fois, leur catégorie sera choisie pour vous.")}</p>

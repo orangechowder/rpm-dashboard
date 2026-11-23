@@ -19,7 +19,7 @@ const T = {
     salesTax: "Sales taxes (GST / QST)", gstCollected: "GST collected", itc: "Input tax credits (GST paid)", netGst: "Net GST", qstCollected: "QST collected", itr: "Input tax refunds (QST paid)", netQst: "Net QST", remit: "Net remittance (refund if negative)",
     filingPeriod: "Filing period", due: "Due", monthly: "Monthly totals", month: "Month",
     entries: "Entries", date: "Date", type: "Type", account: "Account", party: "Customer / vendor", memo: "Description", beforeTax: "Amount before tax", gst: "GST", qst: "QST", total: "Total",
-    paid: "Paid", paidOn: "Paid on", method: "Payment method", receipt: "Receipt on file", source: "Source", id: "Entry ID", createdBy: "Entered by", yes: "Yes", no: "No",
+    paid: "Paid", paidOn: "Paid on", method: "Payment method", receipt: "Receipt reference", source: "Source", id: "Entry ID", createdBy: "Entered by", yes: "Yes", no: "No",
     revenueType: "Revenue", expenseType: "Expense", byCategory: "By category", summary: "Summary", taxes: "Sales taxes", count: "Number of entries", missingReceipts: "Expenses without a receipt", gstNo: "GST no.", qstNo: "QST no.", unpaidIn: "Unpaid customer invoices", unpaidOut: "Unpaid bills",
   },
   fr: {
@@ -29,7 +29,7 @@ const T = {
     salesTax: "Taxes de vente (TPS / TVQ)", gstCollected: "TPS perçue", itc: "Crédits de taxe sur les intrants (TPS payée)", netGst: "TPS nette", qstCollected: "TVQ perçue", itr: "Remboursements de taxe sur les intrants (TVQ payée)", netQst: "TVQ nette", remit: "Versement net (remboursement si négatif)",
     filingPeriod: "Période de déclaration", due: "Échéance", monthly: "Totaux mensuels", month: "Mois",
     entries: "Écritures", date: "Date", type: "Type", account: "Compte", party: "Client / fournisseur", memo: "Description", beforeTax: "Montant avant taxes", gst: "TPS", qst: "TVQ", total: "Total",
-    paid: "Payé", paidOn: "Payé le", method: "Mode de paiement", receipt: "Reçu au dossier", source: "Source", id: "No d'écriture", createdBy: "Saisi par", yes: "Oui", no: "Non",
+    paid: "Payé", paidOn: "Payé le", method: "Mode de paiement", receipt: "Référence du reçu", source: "Source", id: "No d'écriture", createdBy: "Saisi par", yes: "Oui", no: "Non",
     revenueType: "Produit", expenseType: "Charge", byCategory: "Par catégorie", summary: "Sommaire", taxes: "Taxes de vente", count: "Nombre d'écritures", missingReceipts: "Dépenses sans reçu", gstNo: "No TPS", qstNo: "No TVQ", unpaidIn: "Factures clients impayées", unpaidOut: "Factures fournisseurs impayées",
   },
 };
@@ -125,8 +125,6 @@ export async function buildWorkbook(input: ReportInput): Promise<Buffer> {
   const unpaidOut = live.filter((e) => e.kind === "out" && !e.paid).reduce((s, e) => s + e.totalCents, 0);
   const r1 = ws.addRow([t.unpaidIn, dollars(unpaidIn)]); r1.getCell(2).numFmt = money;
   const r2 = ws.addRow([t.unpaidOut, dollars(unpaidOut)]); r2.getCell(2).numFmt = money;
-  const needs = new Set(input.categories.filter((c) => c.needsReceipt).map((c) => c.id));
-  ws.addRow([t.missingReceipts, live.filter((e) => e.kind === "out" && !e.receiptPath && needs.has(e.categoryId)).length]);
 
   // 2. Sales taxes
   const tx = wb.addWorksheet(t.taxes);
@@ -159,7 +157,7 @@ export async function buildWorkbook(input: ReportInput): Promise<Buffer> {
     { header: t.party, key: "party", width: 28 }, { header: t.memo, key: "memo", width: 30 }, { header: t.beforeTax, key: "net", width: 16 },
     { header: t.gst, key: "gst", width: 12 }, { header: t.qst, key: "qst", width: 12 }, { header: t.total, key: "total", width: 14 },
     { header: t.paid, key: "paid", width: 7 }, { header: t.paidOn, key: "paidOn", width: 12 }, { header: t.method, key: "method", width: 14 },
-    { header: t.receipt, key: "receipt", width: 10 }, { header: t.source, key: "source", width: 10 }, { header: t.createdBy, key: "by", width: 16 }, { header: t.id, key: "id", width: 38 },
+    { header: t.receipt, key: "receipt", width: 22 }, { header: t.source, key: "source", width: 10 }, { header: t.createdBy, key: "by", width: 16 }, { header: t.id, key: "id", width: 38 },
   ];
   en.getRow(1).font = { bold: true };
   en.views = [{ state: "frozen", ySplit: 1 }];
@@ -169,7 +167,7 @@ export async function buildWorkbook(input: ReportInput): Promise<Buffer> {
     const row = en.addRow({
       date: e.date, type: e.kind === "in" ? t.revenueType : t.expenseType, account: c ? (input.lang === "fr" ? c.fr : c.en) : e.categoryId, party: e.party, memo: e.description,
       net: dollars(sign * e.netCents), gst: dollars(sign * e.gstCents), qst: dollars(sign * e.qstCents), total: dollars(sign * e.totalCents),
-      paid: e.paid ? t.yes : t.no, paidOn: e.paidOn ?? "", method: e.paymentMethod ?? "", receipt: e.receiptPath ? t.yes : t.no, source: e.source, by: e.createdBy ?? "", id: e.id,
+      paid: e.paid ? t.yes : t.no, paidOn: e.paidOn ?? "", method: e.paymentMethod ?? "", receipt: e.receiptRef || (e.receiptPath ? t.yes : ""), source: e.source, by: e.createdBy ?? "", id: e.id,
     });
     ["net", "gst", "qst", "total"].forEach((k) => (row.getCell(k).numFmt = money));
   }

@@ -1,4 +1,6 @@
 "use client";
+import { WaveCard } from "./wave-panel";
+import type { TaxMode } from "../../lib/money/tax";
 
 import { useEffect, useState } from "react";
 import { Eye, EyeOff, History, RotateCcw, Sparkles } from "lucide-react";
@@ -10,7 +12,7 @@ import { mt } from "./i18n";
 import { Amount, CategoryIcon, Empty, Help, Skeleton } from "./ui";
 
 export function SettingsTab({
-  lang, settings, categories, entries, onSaveSettings, onUpdateCategory, onRestore, onOpenWizard,
+  lang, settings, categories, entries, onSaveSettings, onUpdateCategory, onRestore, onOpenWizard, waveResult = null, onWaveSynced,
 }: {
   lang: Lang;
   settings: MoneySettings;
@@ -20,6 +22,8 @@ export function SettingsTab({
   onUpdateCategory: (id: string, patch: Partial<MoneyCategory>) => Promise<void>;
   onRestore: (entry: MoneyEntry) => void;
   onOpenWizard: () => void;
+  waveResult?: string | null;
+  onWaveSynced: () => Promise<void>;
 }) {
   const [gst, setGst] = useState(settings.gstNumber);
   const [qst, setQst] = useState(settings.qstNumber);
@@ -28,6 +32,7 @@ export function SettingsTab({
 
   return (
     <div className="mn-settings">
+      <WaveCard lang={lang} categories={categories} waveResult={waveResult} onSynced={onWaveSynced} />
       <section className="mn-card">
         <h3>{mt(lang, "general")}</h3>
         <div className="mn-settings-grid">
@@ -50,7 +55,7 @@ export function SettingsTab({
       </section>
 
       <section className="mn-card">
-        <h3>{mt(lang, "categories")}</h3>
+        <h3>{mt(lang, "categories")} <Help lang={lang} topic="taxSetting" /></h3>
         <p className="mn-muted">{mt(lang, "categoriesHelp")}</p>
         <CategoryEditor lang={lang} categories={categories} onUpdate={onUpdateCategory} />
       </section>
@@ -101,8 +106,11 @@ function CategoryEditor({ lang, categories, onUpdate }: { lang: Lang; categories
               <small>{c.kind === "in" ? mt(lang, "moneyIn") : mt(lang, "moneyOut")}</small>
             </button>
           )}
-          <label className="mn-check"><input type="checkbox" checked={c.needsReceipt} onChange={(e) => void onUpdate(c.id, { needsReceipt: e.target.checked })} />{mt(lang, "usuallyReceipt")}</label>
-          <label className="mn-check"><input type="checkbox" checked={c.taxable} onChange={(e) => void onUpdate(c.id, { taxable: e.target.checked })} />{mt(lang, "usuallyTaxes")}</label>
+          <label className="mn-cat-tax"><span className="mn-sr-only">{mt(lang, "taxSetting")}</span>
+            <select value={c.taxMode} aria-label={mt(lang, "taxSetting")} onChange={(e) => void onUpdate(c.id, { taxMode: e.target.value as TaxMode })}>
+              <option value="gst_qst">{mt(lang, "taxGstQst")}</option><option value="gst_only">{mt(lang, "taxGstOnly")}</option><option value="none">{mt(lang, "taxNone")}</option>
+            </select>
+          </label>
           <button type="button" className="mn-ghost" aria-pressed={!c.active} onClick={() => void onUpdate(c.id, { active: !c.active })}>{c.active ? <><Eye size={15} />{mt(lang, "visible")}</> : <><EyeOff size={15} />{mt(lang, "hidden")}</>}</button>
         </li>
       ))}
@@ -130,7 +138,7 @@ const FIELD_NAMES: Record<string, { en: string; fr: string }> = {
   paused: { en: "paused", fr: "en pause" }, skipped_dates: { en: "skipped dates", fr: "dates sautées" }, name: { en: "name", fr: "nom" },
   name_en: { en: "name (EN)", fr: "nom (EN)" }, name_fr: { en: "name (FR)", fr: "nom (FR)" }, active: { en: "shown", fr: "affichée" },
   tax_frequency: { en: "filing frequency", fr: "fréquence des remises" }, fiscal_year_start_month: { en: "year start", fr: "début d'année" },
-  default_category_id: { en: "usual category", fr: "catégorie habituelle" }, needs_receipt: { en: "usually receipt", fr: "reçu habituel" }, taxable_default: { en: "usually taxes", fr: "taxes habituelles" },
+  default_category_id: { en: "usual category", fr: "catégorie habituelle" }, needs_receipt: { en: "usually receipt", fr: "reçu habituel" }, tax_mode: { en: "usual taxes", fr: "taxes habituelles" }, receipt_ref: { en: "receipt reference", fr: "référence du reçu" }, taxable_default: { en: "usually taxes", fr: "taxes habituelles" },
   start_date: { en: "first date", fr: "première date" }, end_date: { en: "last date", fr: "dernière date" }, frequency: { en: "every", fr: "chaque" },
   setup_completed_at: { en: "setup done", fr: "guide terminé" }, gst_number: { en: "GST number", fr: "no TPS" }, qst_number: { en: "QST number", fr: "no TVQ" },
 };

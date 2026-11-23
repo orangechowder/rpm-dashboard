@@ -1253,6 +1253,12 @@ export default function Home() {
   };
   const currentAccount = userAccounts.find((account) => account.name === activeUser);
   const isAdmin = currentAccount?.role === "Admin";
+  // Back from Wave's sign-in page (/?money=settings&wave=…): open Money → Settings.
+  useEffect(() => {
+    if (!isAdmin || new URLSearchParams(window.location.search).get("money") !== "settings") return;
+    const timer = setTimeout(() => setSection("money"), 0);
+    return () => clearTimeout(timer);
+  }, [isAdmin]);
   const changePayrollPeriod = (preset: PayrollPeriodPreset) => {
     const range = payrollPeriodRange(preset);
     setPayrollPeriodPreset(preset);

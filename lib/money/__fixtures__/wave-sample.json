@@ -1,0 +1,48 @@
+{
+  "_note": "Recorded-shape sample of Wave public API answers (made-up business, not real data). Used by wave-sync.test.ts.",
+  "accounts": [
+    { "id": "A-CASH", "name": "Cash on Hand", "isArchived": false, "balance": "1000.00", "balanceInBusinessCurrency": "1000.00", "subtype": { "value": "CASH_AND_BANK" }, "type": { "value": "ASSET" } },
+    { "id": "A-WAVE", "name": "Wave Payments", "isArchived": false, "balance": "500.00", "balanceInBusinessCurrency": "500.00", "subtype": { "value": "CASH_AND_BANK" }, "type": { "value": "ASSET" } },
+    { "id": "A-CREDITS", "name": "Consolidated Customer Credits", "isArchived": false, "balance": "0", "balanceInBusinessCurrency": "0", "subtype": { "value": "SYSTEM_CUSTOMER_CREDITS" }, "type": { "value": "LIABILITY" } },
+    { "id": "A-FEES", "name": "Merchant Account Fees", "isArchived": false, "balance": "123.45", "balanceInBusinessCurrency": "123.45", "subtype": { "value": "PAYMENT_PROCESSING_FEES" }, "type": { "value": "EXPENSE" } },
+    { "id": "A-SALES", "name": "Sales", "isArchived": false, "balance": "0", "balanceInBusinessCurrency": "0", "subtype": { "value": "INCOME" }, "type": { "value": "INCOME" } }
+  ],
+  "invoices": [
+    {
+      "id": "INV-1", "invoiceNumber": "300", "invoiceDate": "2026-12-01", "status": "PAID", "modifiedAt": "2026-12-02T10:00:00Z",
+      "customer": { "id": "C-1", "name": "Transport Roy" },
+      "subtotal": { "minorUnitValue": "100000", "value": "1000.00" }, "discountTotal": { "minorUnitValue": "0", "value": "0.00" }, "total": { "minorUnitValue": "114975", "value": "1149.75" },
+      "items": [
+        { "description": "Hour rate", "subtotal": { "minorUnitValue": "70000", "value": "700.00" }, "product": { "id": "P-HOUR", "name": "Hour rate" }, "account": { "id": "A-SALES", "name": "Sales" },
+          "taxes": [ { "amount": { "minorUnitValue": "3500", "value": "35.00" }, "salesTax": { "id": "T-GST", "name": "GST", "abbreviation": "GST" } }, { "amount": { "minorUnitValue": "6983", "value": "69.83" }, "salesTax": { "id": "T-QST", "name": "QST", "abbreviation": "QST" } } ] },
+        { "description": "Filters", "subtotal": { "minorUnitValue": "30000", "value": "300.00" }, "product": { "id": "P-PARTS", "name": "Parts" }, "account": { "id": "A-SALES", "name": "Sales" },
+          "taxes": [ { "amount": { "minorUnitValue": "1500", "value": "15.00" }, "salesTax": { "id": "T-GST", "name": "GST", "abbreviation": "GST" } }, { "amount": { "minorUnitValue": "2992", "value": "29.92" }, "salesTax": { "id": "T-QST", "name": "QST", "abbreviation": "QST" } } ] }
+      ],
+      "payments": [
+        { "id": "PAY-1", "paymentDate": "2026-12-02", "amount": "1149.75", "paymentMethod": "CREDIT_CARD", "active": true, "state": "COMPLETE", "transactionType": "PAYMENT", "modifiedAt": "2026-12-02T10:00:00Z", "account": { "id": "A-WAVE", "name": "Wave Payments" }, "originInvoicePayment": null }
+      ]
+    },
+    {
+      "id": "INV-2", "invoiceNumber": "301", "invoiceDate": "2026-12-03", "status": "PAID", "modifiedAt": "2026-12-05T10:00:00Z",
+      "customer": { "id": "C-2", "name": "Pavage Bolduc" },
+      "subtotal": { "minorUnitValue": "50000", "value": "500.00" }, "discountTotal": { "minorUnitValue": "0", "value": "0.00" }, "total": { "minorUnitValue": "59213", "value": "592.13" },
+      "items": [
+        { "description": "Service call", "subtotal": { "minorUnitValue": "50000", "value": "500.00" }, "product": { "id": "P-CALL", "name": "Appel de service" }, "account": { "id": "A-SALES", "name": "Sales" },
+          "taxes": [ { "amount": { "minorUnitValue": "2500", "value": "25.00" }, "salesTax": { "id": "T-GST", "name": "GST", "abbreviation": "GST" } }, { "amount": { "minorUnitValue": "4988", "value": "49.88" }, "salesTax": { "id": "T-QST", "name": "QST", "abbreviation": "QST" } }, { "amount": { "minorUnitValue": "1725", "value": "17.25" }, "salesTax": { "id": "T-FRAIS", "name": "Frais de transaction", "abbreviation": "FT" } } ] }
+      ],
+      "payments": [
+        { "id": "PAY-2", "paymentDate": "2026-12-04", "amount": "592.13", "paymentMethod": "BANK_TRANSFER", "active": true, "state": "COMPLETE", "transactionType": "PAYMENT", "modifiedAt": "2026-12-04T10:00:00Z", "account": { "id": "A-CASH", "name": "Cash on Hand" }, "originInvoicePayment": null },
+        { "id": "PAY-2R", "paymentDate": "2026-12-05", "amount": "-50.00", "paymentMethod": "BANK_TRANSFER", "active": true, "state": "COMPLETE", "transactionType": "REFUND", "modifiedAt": "2026-12-05T10:00:00Z", "account": { "id": "A-CASH", "name": "Cash on Hand" }, "originInvoicePayment": { "id": "PAY-2" } },
+        { "id": "PAY-2C", "paymentDate": "2026-12-04", "amount": "10.00", "paymentMethod": "OTHER", "active": true, "state": "COMPLETE", "transactionType": "PAYMENT", "modifiedAt": "2026-12-04T10:00:00Z", "account": { "id": "A-CREDITS", "name": "Consolidated Customer Credits" }, "originInvoicePayment": null }
+      ]
+    }
+  ],
+  "estimates": [
+    {
+      "id": "EST-1", "estimateNumber": "E-12", "estimateDate": "2026-12-06", "modifiedAt": "2026-12-06T10:00:00Z", "customer": { "id": "C-3", "name": "Mazda 3" },
+      "subtotal": { "minorUnitValue": "100000", "value": "1000.00" }, "discountTotal": { "minorUnitValue": "0", "value": "0.00" },
+      "items": [ { "description": "Parts", "subtotal": { "minorUnitValue": "100000", "value": "1000.00" }, "product": { "id": "P-PARTS", "name": "Parts" }, "account": { "id": "A-SALES", "name": "Sales" }, "taxes": [] } ],
+      "payments": [ { "id": "EP-1", "paymentDate": "2026-12-06", "amount": "500.00", "paymentAccountId": "A-WAVE", "paymentMethod": "CREDIT_CARD", "active": true, "state": "COMPLETE", "transactionType": "DEPOSIT", "originPaymentId": null, "modifiedAt": "2026-12-06T10:00:00Z" } ]
+    }
+  ]
+}

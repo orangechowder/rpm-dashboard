@@ -19,7 +19,7 @@ function entry(partial: Partial<MoneyEntry> & Pick<MoneyEntry, "kind" | "date" |
   seq += 1;
   return {
     id: partial.id ?? `e${seq}`,
-    party: "", description: "", taxesIncluded: false, paymentMethod: null, paid: true, paidOn: null, receiptPath: null,
+    party: "", description: "", taxesIncluded: false, paymentMethod: null, paid: true, paidOn: null, receiptPath: null, receiptRef: "",
     recurringId: null, occurrenceDate: null, source: "manual", importKey: null, createdBy: "Marc", createdAt: "", updatedBy: null,
     updatedAt: "", deletedAt: null, deletedBy: null,
     ...partial,
@@ -27,7 +27,7 @@ function entry(partial: Partial<MoneyEntry> & Pick<MoneyEntry, "kind" | "date" |
   };
 }
 
-const categories: MoneyCategory[] = DEFAULT_CATEGORIES.map((c, i) => ({ id: c.id, kind: c.kind, en: c.en, fr: c.fr, icon: c.icon, sortOrder: i, needsReceipt: c.needsReceipt, taxable: c.taxable, active: true }));
+const categories: MoneyCategory[] = DEFAULT_CATEGORIES.map((c, i) => ({ id: c.id, kind: c.kind, en: c.en, fr: c.fr, icon: c.icon, sortOrder: i, needsReceipt: c.needsReceipt, taxable: c.taxable, taxMode: c.taxable ? "gst_qst" as const : "none" as const, active: true }));
 
 describe("cents", () => {
   it("parses what people type, without floats", () => {
@@ -310,7 +310,7 @@ describe("insights", () => {
     expect(summarySentence(now, before, "thisMonth", categories, "en")).toBe("This month you kept 18¢ of every dollar. Fuel – service trucks is up 22% vs last month.");
     expect(summarySentence(now, before, "thisMonth", categories, "fr")).toContain("18 ¢");
   });
-  it("needs attention: old unpaid invoices, missing receipts, upcoming bills", () => {
+  it("needs attention: old unpaid invoices, upcoming bills (no receipt reminders)", () => {
     const list = [
       entry({ kind: "in", categoryId: "labour_revenue", date: "2026-10-01", totalCents: 50000, paid: false }),
       entry({ kind: "in", categoryId: "labour_revenue", date: "2026-11-10", totalCents: 50000, paid: false }),
@@ -321,7 +321,8 @@ describe("insights", () => {
     const rule: RecurringRule = { id: "r", name: "Rent", kind: "out", categoryId: "shop_rent", party: "", amountCents: 100000, taxesIncluded: false, frequency: "monthly", startDate: "2026-01-25", endDate: null, paused: false, autoPaid: true, paymentMethod: null, skippedDates: [], deletedAt: null };
     const items = needsAttention(list, [rule], categories, "2026-11-22");
     expect(items.filter((i) => i.type === "unpaid")).toHaveLength(1);
-    expect(items.filter((i) => i.type === "receipt")).toHaveLength(1);
+    expect(items.filter((i) => i.type === "receipt")).toHaveLength(0); // receipt photos are turned off
+    expect(needsAttention(list, [rule], categories, "2026-11-22", { receipts: true }).filter((i) => i.type === "receipt")).toHaveLength(1);
     expect(items.find((i) => i.type === "bill-due")).toMatchObject({ date: "2026-11-25" });
   });
   it("spots a month with suspiciously few expenses", () => {

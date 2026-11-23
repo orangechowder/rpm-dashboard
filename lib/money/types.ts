@@ -1,3 +1,4 @@
+import type { TaxMode } from "./tax";
 import type { Cents } from "./cents";
 import type { MoneyKind } from "./categories";
 import type { ISODate } from "./dates";
@@ -21,7 +22,9 @@ export type MoneyEntry = {
   receiptPath: string | null;
   recurringId: string | null;
   occurrenceDate: ISODate | null;
-  source: "manual" | "recurring" | "import";
+  source: "manual" | "recurring" | "import" | "wave";
+  /** Where the paper or PDF receipt is (invoice #, "paper file Nov 2026"…). Receipt photos are turned off. */
+  receiptRef: string;
   importKey: string | null;
   createdBy: string | null;
   createdAt: string;
@@ -40,6 +43,8 @@ export type MoneyCategory = {
   sortOrder: number;
   needsReceipt: boolean;
   taxable: boolean;
+  /** GST+QST included / GST only / no tax: how imported and new expenses in this category are split. */
+  taxMode: TaxMode;
   active: boolean;
 };
 

@@ -5,8 +5,12 @@
 import { divRound } from "../../../../lib/money/cents";
 import { checkDuplicates, importKeys, suggestCategory, type ImportRow } from "../../../../lib/money/matching";
 import { isISODate, addDays } from "../../../../lib/money/dates";
-import { manualTaxes, noTaxes, splitTaxesIncluded } from "../../../../lib/money/tax";
-import { rowToEntry } from "../../../../lib/money/rows";
+import { manualTaxes, noTaxes, splitByMode, splitTaxesIncluded, TAX_MODES, type TaxMode } from "../../../../lib/money/tax";
+import { classifyBankLines, type BankRule } from "../../../../lib/money/bank-import";
+import { previousTaxPeriod, taxPeriodFor } from "../../../../lib/money/periods";
+import type { ISODate } from "../../../../lib/money/dates";
+import type { MoneyCategory } from "../../../../lib/money/types";
+import { rowToEntry, toTaxMode } from "../../../../lib/money/rows";
 import { bearerToken, jsonError, jsonOk, readJson, requireStaff, userClient } from "../../../../lib/server/staff-auth";
 
 const SOURCES = new Set(["bank", "wave", "desjardins"]);
@@ -60,7 +64,7 @@ export async function POST(request: Request) {
     const checks = checkDuplicates(list, keys, unique);
     const [{ data: parties }, { data: categories }, { data: history }] = await Promise.all([
       db.from("money_parties").select("name,default_category_id"),
-      db.from("money_categories").select("id,kind,active"),
+      db.from("money_categories").select("id,kind,name_en,name_fr,icon,sort_order,needs_receipt,taxable_default,tax_mode,active"),
       db.from("money_entries").select(ENTRY_COLUMNS).is("deleted_at", null).neq("party_name", "").order("created_at", { ascending: false }).limit(3000),
     ]);
     const memory = (parties ?? []).map((p) => ({ name: String(p.name), categoryId: p.default_category_id ? String(p.default_category_id) : null }));
@@ -68,6 +72,23 @@ export async function POST(request: Request) {
     const byKind = { in: new Set<string>(), out: new Set<string>() };
     for (const c of categories ?? []) if (c.active) byKind[c.kind === "in" ? "in" : "out"].add(String(c.id));
     const byId = new Map(unique.map((e) => [e.id, e]));
+    if (body.bank === true) {
+      // Bank / credit-card file: decide what every line is (expense, bill paid, transfer, tax payment, …).
+      const { data: ruleRows, error: ruleError } = await db.from("money_bank_rules").select("match_key,kind,action,category_id,party_name,tax_mode");
+      if (ruleError) return jsonError(500, "lookup_failed", ruleError.message);
+      const rules: BankRule[] = (ruleRows ?? []).map((r) => ({ matchKey: String(r.match_key), kind: r.kind === "in" ? "in" : "out", action: r.action === "transfer" ? "transfer" : "category", categoryId: r.category_id ? String(r.category_id) : null, partyName: String(r.party_name ?? ""), taxMode: r.tax_mode ? toTaxMode(r.tax_mode) : null }));
+      const cats: MoneyCategory[] = (categories ?? []).map((r) => ({ id: String(r.id), kind: r.kind === "in" ? "in" : "out", en: String(r.name_en), fr: String(r.name_fr), icon: String(r.icon), sortOrder: Number(r.sort_order), needsReceipt: Boolean(r.needs_receipt), taxable: Boolean(r.taxable_default), taxMode: toTaxMode(r.tax_mode, Boolean(r.taxable_default)), active: Boolean(r.active) }));
+      const all = [...new Map([...unique, ...historyEntries].map((e) => [e.id, e])).values()];
+      const classified = classifyBankLines(list, keys, { existing: all, rules, memory, categories: cats, incomeFromWave: body.incomeFromWave !== false });
+      const allById = new Map(all.map((e) => [e.id, e]));
+      return jsonOk({
+        results: list.map((row, i) => {
+          const c = classified[i];
+          const match = c.matchId ? allById.get(c.matchId) : null;
+          return { key: keys[i], ...c, match: match ? { date: match.date, party: match.party, totalCents: match.totalCents, categoryId: match.categoryId } : null };
+        }),
+      });
+    }
     return jsonOk({
       results: list.map((row, i) => {
         const match = checks[i].matchId ? byId.get(checks[i].matchId!) : null;
@@ -84,6 +105,8 @@ export async function POST(request: Request) {
 
   if (body.action === "commit") {
     const { data: categories, error: catError } = await db.from("money_categories").select("id,kind");
+    const bills: Array<{ key: string; billId: string; date: string }> = [];
+    const taxPayments: Array<{ key: string; date: string; totalCents: number }> = [];
     if (catError) return jsonError(500, "lookup_failed", catError.message);
     const kindOf = new Map((categories ?? []).map((c) => [String(c.id), c.kind === "in" ? "in" : "out"]));
     const rows: Array<Record<string, unknown>> = [];
@@ -92,14 +115,29 @@ export async function POST(request: Request) {
       const row = cleanRow(raw);
       const categoryId = String(raw?.categoryId ?? "");
       const key = String(raw?.key ?? "");
-      if (!row || kindOf.get(categoryId) !== row.kind) return jsonError(400, "bad_row", JSON.stringify(raw).slice(0, 200));
-      if (!key.startsWith(`${source}|${row.date}|${row.kind}|${row.totalCents}|`) || key.length > 300) return jsonError(400, "bad_key");
+      const treatment = String(raw?.treatment ?? "expense");
+      if (!row || !key.startsWith(`${source}|${row.date}|${row.kind}|${row.totalCents}|`) || key.length > 300) return jsonError(400, "bad_key");
+      if (treatment === "bill") {
+        if (row.kind !== "out" || typeof raw.billId !== "string") return jsonError(400, "bad_row");
+        bills.push({ key, billId: raw.billId, date: row.date });
+        continue;
+      }
+      if (treatment === "tax-payment") {
+        if (row.kind !== "out") return jsonError(400, "bad_row");
+        taxPayments.push({ key, date: row.date, totalCents: row.totalCents });
+        continue;
+      }
+      if (treatment !== "expense") return jsonError(400, "bad_treatment");
+      if (kindOf.get(categoryId) !== row.kind) return jsonError(400, "bad_row", JSON.stringify(raw).slice(0, 200));
       let split;
       const taxCents = raw.taxCents === null || raw.taxCents === undefined ? null : Number(raw.taxCents);
       const exact = raw.gstCents !== undefined && raw.gstCents !== null && raw.qstCents !== undefined && raw.qstCents !== null;
+      const taxMode = typeof raw.taxMode === "string" && (TAX_MODES as string[]).includes(raw.taxMode) ? (raw.taxMode as TaxMode) : null;
       if (exact) {
         // Wave General Ledger: GST and QST already taken from the invoice's own tax lines.
         split = manualTaxes(row.totalCents, Number(raw.gstCents), Number(raw.qstCents));
+      } else if (taxMode) {
+        split = splitByMode(row.totalCents, taxMode); // bank lines: the category's tax setting, or this line's exception
       } else if (taxCents !== null && Number.isSafeInteger(taxCents) && taxCents > 0) {
         const gst = divRound(BigInt(taxCents) * BigInt(5000), 14975); // the tax amount from Wave, split GST:QST = 5 : 9.975
         split = manualTaxes(row.totalCents, gst, taxCents - gst);
@@ -114,7 +152,7 @@ export async function POST(request: Request) {
       });
       if (row.party.trim()) memory.set(row.party.trim().toLowerCase(), { name: row.party.trim(), kind: row.kind === "in" ? "client" : "supplier", categoryId });
     }
-    const { data: batch, error: batchError } = await db.from("money_import_batches").insert({ source, file_name: String(body.fileName ?? "").slice(0, 200), row_count: rows.length }).select("id").single();
+    const { data: batch, error: batchError } = await db.from("money_import_batches").insert({ source, file_name: String(body.fileName ?? "").slice(0, 200), row_count: rows.length + bills.length + taxPayments.length }).select("id").single();
     if (batchError) return jsonError(500, "save_failed", batchError.message);
     let created = 0;
     for (let i = 0; i < rows.length; i += 250) {
@@ -131,7 +169,46 @@ export async function POST(request: Request) {
       if (!found) await db.from("money_parties").insert({ name: p.name, kind: p.kind, default_category_id: p.categoryId });
       else if (found.default_category_id !== p.categoryId) await db.from("money_parties").update({ default_category_id: p.categoryId, kind: found.kind === p.kind ? found.kind : "both" }).eq("id", found.id);
     }
-    return jsonOk({ created, skipped: rows.length - created, batchId: batch.id });
+    // Bills logged by hand that this file paid: marked paid (the bank line's key is kept so a re-import finds it).
+    let billsPaid = 0;
+    const billsInClosedMonths: string[] = [];
+    for (const b of bills) {
+      const { data, error } = await db.from("money_entries").update({ paid: true, paid_on: b.date, import_key: b.key })
+        .eq("id", b.billId).eq("kind", "out").eq("paid", false).is("deleted_at", null).is("import_key", null).select("id");
+      if (error) { if (error.message.includes("money_month_locked")) { billsInClosedMonths.push(b.billId); continue; } return jsonError(500, "save_failed", error.message); }
+      billsPaid += data?.length ?? 0;
+    }
+    // GST/QST sent to Revenu Québec / CRA: the period before the payment is marked "sent" in Taxes (never an expense).
+    let taxFilings = 0;
+    if (taxPayments.length) {
+      const { data: set } = await db.from("money_settings").select("tax_frequency,fiscal_year_start_month").eq("id", 1).maybeSingle();
+      const settings = { taxFrequency: (set?.tax_frequency ?? "quarterly") as "monthly" | "quarterly" | "yearly", fiscalYearStartMonth: Number(set?.fiscal_year_start_month) || 1 };
+      for (const t of taxPayments) {
+        const period = previousTaxPeriod(taxPeriodFor(t.date as ISODate, settings), settings);
+        const { data, error } = await db.from("money_tax_filings").upsert({ period_start: period.start, period_end: period.end, filed_on: t.date, amount_cents: t.totalCents }, { onConflict: "period_start,period_end", ignoreDuplicates: true }).select("period_start");
+        if (error) return jsonError(500, "save_failed", error.message);
+        taxFilings += data?.length ?? 0;
+      }
+    }
+    // Choices to remember for similar lines ("transfer, not an expense" or supplier → category).
+    let rulesSaved = 0;
+    if (Array.isArray(body.rules)) {
+      const ruleRows = (body.rules as Array<Record<string, unknown>>).slice(0, 500).flatMap((r) => {
+        const matchKey = String(r.matchKey ?? "").trim().slice(0, 120);
+        const action = r.action === "transfer" ? "transfer" : r.action === "category" ? "category" : null;
+        const kind = r.kind === "in" ? "in" : r.kind === "out" ? "out" : null;
+        const categoryId = r.categoryId ? String(r.categoryId) : null;
+        if (matchKey.length < 2 || !action || !kind || (action === "category" && (!categoryId || kindOf.get(categoryId) !== kind))) return [];
+        const mode = typeof r.taxMode === "string" && (TAX_MODES as string[]).includes(r.taxMode) ? r.taxMode : null;
+        return [{ match_key: matchKey, kind, action, category_id: action === "category" ? categoryId : null, party_name: String(r.partyName ?? "").slice(0, 120), tax_mode: mode, example: String(r.example ?? "").slice(0, 200) }];
+      });
+      if (ruleRows.length) {
+        const { data, error } = await db.from("money_bank_rules").upsert(ruleRows, { onConflict: "match_key" }).select("match_key");
+        if (error) return jsonError(500, "save_failed", error.message);
+        rulesSaved = data?.length ?? 0;
+      }
+    }
+    return jsonOk({ created, skipped: rows.length - created, billsPaid, billsInClosedMonths, taxFilings, rulesSaved, batchId: batch.id });
   }
 
   return jsonError(400, "bad_action");

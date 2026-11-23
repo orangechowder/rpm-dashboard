@@ -11,13 +11,13 @@ function client() {
   return supabase;
 }
 
-const ENTRY_COLUMNS = "id,kind,entry_date,category_id,party_name,description,total_cents,gst_cents,qst_cents,net_cents,taxes_included,payment_method,paid,paid_on,receipt_path,recurring_id,occurrence_date,source,import_key,created_by,created_at,updated_by,updated_at,deleted_at,deleted_by";
+const ENTRY_COLUMNS = "id,kind,entry_date,category_id,party_name,description,total_cents,gst_cents,qst_cents,net_cents,taxes_included,payment_method,paid,paid_on,receipt_path,receipt_ref,recurring_id,occurrence_date,source,import_key,created_by,created_at,updated_by,updated_at,deleted_at,deleted_by";
 
-import { int, rowToEntry, str, type Row } from "./rows";
+import { int, rowToEntry, str, toTaxMode, type Row } from "./rows";
 export { rowToEntry };
 
 export type EntryInput = Pick<MoneyEntry, "kind" | "date" | "categoryId" | "party" | "description" | "totalCents" | "gstCents" | "qstCents" | "taxesIncluded" | "paymentMethod" | "paid" | "paidOn" | "receiptPath">
-  & Partial<Pick<MoneyEntry, "recurringId" | "occurrenceDate" | "source" | "importKey">>;
+  & Partial<Pick<MoneyEntry, "recurringId" | "occurrenceDate" | "source" | "importKey" | "receiptRef">>;
 
 export function entryToRow(input: EntryInput): Row {
   return {
@@ -34,6 +34,7 @@ export function entryToRow(input: EntryInput): Row {
     paid: input.paid,
     paid_on: input.paid ? (input.paidOn ?? input.date) : null,
     receipt_path: input.receiptPath,
+    ...(input.receiptRef !== undefined ? { receipt_ref: input.receiptRef.trim().slice(0, 120) } : {}),
     ...(input.recurringId !== undefined ? { recurring_id: input.recurringId, occurrence_date: input.occurrenceDate ?? null } : {}),
     ...(input.source ? { source: input.source } : {}),
     ...(input.importKey !== undefined ? { import_key: input.importKey } : {}),
@@ -132,18 +133,19 @@ export async function restoreEntry(id: string): Promise<MoneyEntry> {
 
 // ---------- Categories / parties / settings ----------
 export async function loadCategories(): Promise<MoneyCategory[]> {
-  const { data, error } = await client().from("money_categories").select("id,kind,name_en,name_fr,icon,sort_order,needs_receipt,taxable_default,active").order("sort_order");
+  const { data, error } = await client().from("money_categories").select("id,kind,name_en,name_fr,icon,sort_order,needs_receipt,taxable_default,tax_mode,active").order("sort_order");
   wrap(error);
-  return (data ?? []).map((r: Row) => ({ id: str(r.id), kind: r.kind === "in" ? "in" : "out", en: str(r.name_en), fr: str(r.name_fr), icon: str(r.icon), sortOrder: Number(r.sort_order), needsReceipt: Boolean(r.needs_receipt), taxable: Boolean(r.taxable_default), active: Boolean(r.active) }));
+  return (data ?? []).map((r: Row) => ({ id: str(r.id), kind: r.kind === "in" ? "in" : "out", en: str(r.name_en), fr: str(r.name_fr), icon: str(r.icon), sortOrder: Number(r.sort_order), needsReceipt: Boolean(r.needs_receipt), taxable: Boolean(r.taxable_default), taxMode: toTaxMode(r.tax_mode, Boolean(r.taxable_default)), active: Boolean(r.active) }));
 }
 
-export async function updateCategory(id: string, patch: Partial<Pick<MoneyCategory, "en" | "fr" | "active" | "needsReceipt" | "taxable">>) {
+export async function updateCategory(id: string, patch: Partial<Pick<MoneyCategory, "en" | "fr" | "active" | "needsReceipt" | "taxable" | "taxMode">>) {
   const row: Row = {};
   if (patch.en !== undefined) row.name_en = patch.en.trim();
   if (patch.fr !== undefined) row.name_fr = patch.fr.trim();
   if (patch.active !== undefined) row.active = patch.active;
   if (patch.needsReceipt !== undefined) row.needs_receipt = patch.needsReceipt;
   if (patch.taxable !== undefined) row.taxable_default = patch.taxable;
+  if (patch.taxMode !== undefined) { row.tax_mode = patch.taxMode; row.taxable_default = patch.taxMode !== "none"; }
   const { error } = await client().from("money_categories").update(row).eq("id", id);
   wrap(error);
 }

@@ -454,3 +454,46 @@
   .mn-account-row { grid-template-columns: minmax(0, 1fr); }
 }
 .mn-steps li > span:last-child > button { justify-self: start; }
+
+/* ---------- Wave → Money sync ---------- */
+.mn-banner-ok { background: rgb(var(--green-rgb) / .1); color: var(--ink); }
+.mn-wave { display: grid; gap: 12px; }
+.mn-wave h3 { display: flex; align-items: center; gap: 8px; }
+.mn-wave-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; font-size: 14px; }
+.mn-pill { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 800; }
+.mn-pill-ok { background: rgb(var(--green-rgb) / .14); color: var(--green); }
+.mn-pill-bad { background: rgb(var(--red-rgb) / .12); color: var(--red); }
+.mn-wave-connect { display: grid; gap: 10px; justify-items: start; }
+.mn-wave-map .mn-account-row select { max-width: 260px; }
+.mn-wave-preview { display: grid; gap: 10px; padding: 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-soft); min-width: 0; }
+.mn-wave-baseline { max-width: 360px; }
+.mn-att-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-shrink: 0; }
+@media (max-width: 640px) {
+  .mn-att-wave { flex-wrap: wrap; }
+  .mn-att-wave .mn-att-actions { margin-left: 26px; }
+  .mn-wave-map .mn-account-row select { max-width: none; }
+}
+
+/* ---------- Bank import review ---------- */
+.mn-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.mn-cat-tax select { min-width: 0; max-width: 190px; }
+.mn-bank { display: grid; gap: 12px; min-width: 0; }
+.mn-bank-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.mn-bank-tile { display: grid; gap: 2px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-soft); }
+.mn-bank-tile b { font-size: 20px; color: var(--ink); }
+.mn-bank-tile span { font-size: 12.5px; color: var(--ink); font-weight: 600; }
+.mn-bank-tile small { font-family: var(--font-jetbrains-mono), monospace; font-size: 12px; color: var(--muted); }
+.mn-bank-out { border-color: rgb(var(--red-rgb) / .35); }
+.mn-bank-warn { border-color: rgb(var(--amber-rgb) / .5); background: rgb(var(--amber-rgb) / .08); }
+.mn-bank-row { display: grid; grid-template-columns: 92px minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.mn-bank-row select { grid-column: 2 / -1; max-width: 100%; }
+.mn-bank-row .mn-review-desc { display: grid; min-width: 0; }
+.mn-bank-row .mn-review-desc small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mn-bank-transfer, .mn-bank-income, .mn-bank-duplicate, .mn-bank-skip { opacity: .65; }
+.mn-bank-actions { flex-wrap: wrap; }
+.mn-tile-suggested { outline: 2px dashed rgb(var(--amber-rgb) / .7); outline-offset: -2px; }
+.mn-bank-done li { padding: 4px 0; }
+@media (min-width: 900px) {
+  .mn-bank-row { grid-template-columns: 92px minmax(0, 1fr) auto 210px 190px 170px; }
+  .mn-bank-row select { grid-column: auto; }
+}

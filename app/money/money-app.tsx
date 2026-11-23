@@ -26,7 +26,9 @@ import { DEFAULT_SETTINGS, type MoneyCategory, type MoneyEntry, type MoneySettin
 import { EntrySheet, type EntryDraft } from "./entry-sheet";
 import { mt, type MoneyKey } from "./i18n";
 import { LogTab, type Filter } from "./log-tab";
-import { initialPeriod, OverviewTab, type PeriodState } from "./overview-tab";
+import { initialPeriod, OverviewTab, type GoTarget, type PeriodState } from "./overview-tab";
+import { loadWaveAttention, resolveWave, type WaveAttention } from "./wave-panel";
+import { supabase } from "../../lib/supabase";
 import { SettingsTab } from "./settings-tab";
 import { ToastHost, type Toast } from "./ui";
 
@@ -44,7 +46,12 @@ const TABS: Array<{ id: MoneyTab; label: MoneyKey }> = [
 
 export default function MoneyApp({ language, clients }: { language: Lang; clients: string[] }) {
   const lang = language;
-  const [tab, setTab] = useState<MoneyTab>("overview");
+  const [tab, setTab] = useState<MoneyTab>(() => (new URLSearchParams(window.location.search).get("money") === "settings" ? "settings" : "overview"));
+  const [waveResult] = useState(() => new URLSearchParams(window.location.search).get("wave"));
+  useEffect(() => {
+    if (!new URLSearchParams(window.location.search).get("money")) return;
+    window.history.replaceState(null, "", window.location.pathname);
+  }, []);
   const [period, setPeriod] = useState<PeriodState>(initialPeriod);
   const [focusMonth, setFocusMonth] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -58,6 +65,7 @@ export default function MoneyApp({ language, clients }: { language: Lang; client
   const [balances, setBalances] = useState<Map<string, Cents>>(new Map());
   const [filings, setFilings] = useState<Filings>(new Map());
   const [wizard, setWizard] = useState(false);
+  const [waveItems, setWaveItems] = useState<WaveAttention[]>([]);
   const [sheet, setSheet] = useState<{ draft: EntryDraft; editing: MoneyEntry | null; key: number } | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toastId = useRef(0);
@@ -120,6 +128,8 @@ export default function MoneyApp({ language, clients }: { language: Lang; client
       }
       setEntries(all);
       setLoadError(null);
+      // Wave sync lines for "Needs attention" (never blocks the rest of Money).
+      loadWaveAttention().then(setWaveItems).catch(() => setWaveItems([]));
     } catch (error) {
       setLoadError(failMessageRef.current(error));
     } finally {
@@ -205,10 +215,23 @@ export default function MoneyApp({ language, clients }: { language: Lang; client
   };
 
   const [logFilter, setLogFilter] = useState<{ value: Filter; key: number }>({ value: "all", key: 0 });
-  const goTo = (next: "bills" | "monthly" | "import" | "log-receipts", month?: string) => {
+  const goTo = (next: GoTarget, month?: string) => {
     if (month) setFocusMonth(month);
-    if (next === "log-receipts") { setLogFilter({ value: "receipt", key: Date.now() }); setTab("log"); return; }
+    if (next === "log-receipts") { setLogFilter({ value: "all", key: Date.now() }); setTab("log"); return; }
     setTab(next);
+  };
+
+  const waveAction = async (item: WaveAttention, action: "add" | "ignore") => {
+    try {
+      await resolveWave(item.ref, action === "add" ? "added" : "ignored");
+      setWaveItems((list) => list.filter((i) => i.ref !== item.ref));
+      if (action === "add") {
+        await fetch("/api/money/wave/sync", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${(await supabase!.auth.getSession()).data.session?.access_token ?? ""}` }, body: JSON.stringify({ mode: "sync" }) });
+        await reload();
+      }
+    } catch (error) {
+      toast(failMessage(error));
+    }
   };
 
   const saveBill = async (input: Partial<RuleInput>, id?: string) => {
@@ -313,7 +336,7 @@ export default function MoneyApp({ language, clients }: { language: Lang; client
   const changeCategory = async (id: string, patch: Partial<MoneyCategory>) => {
     try {
       await updateCategory(id, patch);
-      setCategories((list) => list.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+      setCategories((list) => list.map((c) => (c.id === id ? { ...c, ...patch, ...(patch.taxMode ? { taxable: patch.taxMode !== "none" } : {}) } : c)));
     } catch (error) {
       toast(failMessage(error), { tone: "error" });
     }
@@ -337,7 +360,7 @@ export default function MoneyApp({ language, clients }: { language: Lang; client
       {loadError && <p className="mn-banner mn-banner-error" role="alert">{loadError} <button type="button" className="mn-link" onClick={() => { setLoading(true); void reload(); }}>↻</button></p>}
 
       {tab === "overview" && (
-        <OverviewTab lang={lang} entries={entries} categories={categories} settings={settings} rules={rules} loading={loading} period={period} onPeriod={setPeriod} onOpenEntry={openEdit} onMarkPaid={(e) => void markPaid(e)} onGo={goTo}
+        <OverviewTab lang={lang} entries={entries} categories={categories} settings={settings} rules={rules} loading={loading} period={period} onPeriod={setPeriod} onOpenEntry={openEdit} onMarkPaid={(e) => void markPaid(e)} onGo={goTo} waveItems={waveItems} onWaveAction={(item, action) => void waveAction(item, action)}
           extraCards={!loading ? <KeepAsideCard lang={lang} entries={entries} settings={settings} filings={filings} /> : null} />
       )}
       {tab === "log" && (
@@ -363,7 +386,7 @@ export default function MoneyApp({ language, clients }: { language: Lang; client
           onSaveBill={(input) => saveBill(input)} onFinish={() => void finishWizard()} onStartImport={() => { void finishWizard(); setTab("import"); }} />
       )}
       {tab === "settings" && !loading && (
-        <SettingsTab lang={lang} settings={settings} categories={categories} entries={entries} onSaveSettings={changeSettings} onUpdateCategory={changeCategory} onRestore={(e) => void restore(e)} onOpenWizard={() => setWizard(true)} />
+        <SettingsTab lang={lang} settings={settings} categories={categories} entries={entries} onSaveSettings={changeSettings} onUpdateCategory={changeCategory} onRestore={(e) => void restore(e)} onOpenWizard={() => setWizard(true)} waveResult={waveResult} onWaveSynced={reload} />
       )}
 
       {sheet && (

@@ -46,3 +46,21 @@ export function manualTaxes(totalCents: Cents, gstCents: Cents, qstCents: Cents)
   if (gstCents < 0 || qstCents < 0 || gstCents + qstCents > totalCents) return null;
   return { netCents: totalCents - gstCents - qstCents, gstCents, qstCents, totalCents };
 }
+
+/** How a category's amounts usually carry sales taxes (set per category in Settings, changeable per line). */
+export type TaxMode = "gst_qst" | "gst_only" | "none";
+export const TAX_MODES: TaxMode[] = ["gst_qst", "gst_only", "none"];
+
+/** Total paid with GST only (out-of-province or US supplier billing GST, no QST): rounded once, adds up exactly. */
+export function splitGstOnlyIncluded(totalCents: Cents): TaxSplit {
+  assertCents(totalCents);
+  const estimatedNet = divRound(BigInt(totalCents) * BigInt(GST_RATE.denominator), GST_RATE.denominator + GST_RATE.numerator);
+  const gstCents = gstOn(estimatedNet);
+  return { netCents: totalCents - gstCents, gstCents, qstCents: 0, totalCents };
+}
+
+export function splitByMode(totalCents: Cents, mode: TaxMode): TaxSplit {
+  if (mode === "gst_qst") return splitTaxesIncluded(totalCents);
+  if (mode === "gst_only") return splitGstOnlyIncluded(totalCents);
+  return noTaxes(totalCents);
+}

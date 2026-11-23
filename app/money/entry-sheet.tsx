@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Camera, Copy, Lock, Paperclip, Trash2, Upload } from "lucide-react";
+import { Copy, Lock, Trash2 } from "lucide-react";
 import { centsToInput, formatMoney, parseMoney, type Cents, type Lang } from "../../lib/money/cents";
 import { PAYMENT_METHODS, type MoneyKind } from "../../lib/money/categories";
 import { isISODate, monthKey, todayISO } from "../../lib/money/dates";
 import { manualTaxes, noTaxes, splitTaxesIncluded, type TaxSplit } from "../../lib/money/tax";
-import { receiptUrl, type EntryInput, type Party } from "../../lib/money/repository";
+import { type EntryInput, type Party } from "../../lib/money/repository";
 import { similarity } from "../../lib/money/matching";
 import type { MoneyCategory, MoneyEntry } from "../../lib/money/types";
 import { mt, paymentLabel } from "./i18n";
@@ -49,26 +49,15 @@ export function EntrySheet({
   const [paidOn, setPaidOn] = useState(draft.paidOn ?? "");
   const [method, setMethod] = useState<string | null>(draft.paymentMethod ?? null);
   const [note, setNote] = useState(draft.description ?? "");
-  const [receiptPath, setReceiptPath] = useState<string | null>(draft.receiptPath ?? null);
-  const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
+  // Receipt photos are turned off: an existing photo stays attached; a short reference is typed instead.
+  const receiptPath = draft.receiptPath ?? null;
+  const [receiptRef, setReceiptRef] = useState(draft.receiptRef ?? "");
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const amountRef = useRef<HTMLInputElement>(null);
-  const cameraRef = useRef<HTMLInputElement>(null);
-  const uploadRef = useRef<HTMLInputElement>(null);
 
   const locked = Boolean(editing && lockedMonths.has(monthKey(editing.date))) || lockedMonths.has(monthKey(date));
   const cents = parseMoney(amountText);
-
-  const previewRef = useRef<string | null>(null);
-  const chooseFile = (next: File | null) => {
-    if (previewRef.current) URL.revokeObjectURL(previewRef.current);
-    previewRef.current = next && next.type.startsWith("image/") ? URL.createObjectURL(next) : null;
-    setPreview(previewRef.current);
-    setFile(next);
-  };
-  useEffect(() => () => { if (previewRef.current) URL.revokeObjectURL(previewRef.current); }, []);
 
   const split: TaxSplit | null = useMemo(() => {
     if (cents === null || cents < 0) return null;
@@ -133,21 +122,19 @@ export function EntrySheet({
       taxesIncluded: manual ? true : taxesIncluded,
       paymentMethod: method, paid, paidOn: paid ? (isISODate(paidOn) ? paidOn : date) : null,
       receiptPath,
+      receiptRef,
     };
     setBusy(true);
-    const ok = await onSave(input, file, editing?.id ?? null, again);
+    const ok = await onSave(input, null, editing?.id ?? null, again);
     setBusy(false);
     if (ok && again) {
-      setAmountText(""); setParty(""); setNote(""); chooseFile(null); setReceiptPath(null); setManual(false); setGstText(""); setQstText("");
+      setAmountText(""); setParty(""); setNote(""); setReceiptRef(""); setManual(false); setGstText(""); setQstText("");
       setCategoryId(""); setCategoryPicked(false); setTaxesTouched(false);
       amountRef.current?.focus();
     }
   };
 
-  const openReceipt = async () => {
-    if (!receiptPath) return;
-    try { window.open(await receiptUrl(receiptPath), "_blank", "noopener"); } catch { setProblem(mt(lang, "errorGeneric")); }
-  };
+
 
   const title = editing ? mt(lang, "edit") : kind === "in" ? mt(lang, "moneyIn") : mt(lang, "moneyOut");
   const showTaxLine = split && split.totalCents > 0;
@@ -260,20 +247,9 @@ export function EntrySheet({
           </div>
         </fieldset>
 
-        <div className="mn-field">
-          <span className="mn-field-label">{mt(lang, "receipt")} <Help lang={lang} topic="receipt" /></span>
-          <div className="mn-receipt">
-            {/* eslint-disable-next-line @next/next/no-img-element -- local blob preview of the photo just taken */}
-            {preview && <img src={preview} alt="" className="mn-receipt-thumb" />}
-            {file && !preview && <span className="mn-receipt-file"><Paperclip size={14} />{file.name}</span>}
-            {!file && receiptPath && <button type="button" className="mn-chip" onClick={() => void openReceipt()}><Paperclip size={14} />{mt(lang, "viewReceipt")}</button>}
-            <button type="button" className="mn-chip" onClick={() => cameraRef.current?.click()}><Camera size={15} />{mt(lang, "takePhoto")}</button>
-            <button type="button" className="mn-chip" onClick={() => uploadRef.current?.click()}><Upload size={15} />{mt(lang, "uploadFile")}</button>
-            {(file || receiptPath) && <button type="button" className="mn-link" onClick={() => { chooseFile(null); setReceiptPath(null); }}>{mt(lang, "removeReceipt")}</button>}
-            <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => chooseFile(e.target.files?.[0] ?? null)} />
-            <input ref={uploadRef} type="file" accept="image/*,application/pdf" hidden onChange={(e) => chooseFile(e.target.files?.[0] ?? null)} />
-          </div>
-        </div>
+        <label className="mn-field">{mt(lang, "receiptRef")} <Help lang={lang} topic="receiptRef" />
+          <input value={receiptRef} maxLength={120} placeholder={mt(lang, "receiptRefExample")} onChange={(e) => setReceiptRef(e.target.value)} />
+        </label>
 
         <label className="mn-field">{mt(lang, "note")}<input value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} /></label>
 

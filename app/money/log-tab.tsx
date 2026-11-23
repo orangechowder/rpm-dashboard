@@ -1,14 +1,14 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { Copy, Lock, Paperclip, Repeat, Search, Trash2 } from "lucide-react";
+import { Copy, Lock, Repeat, Search, Trash2 } from "lucide-react";
 import { formatMoney, parseMoney, type Lang } from "../../lib/money/cents";
 import { formatDate, monthKey, todayISO } from "../../lib/money/dates";
 import type { MoneyCategory, MoneyEntry } from "../../lib/money/types";
 import { mt } from "./i18n";
 import { Amount, CategoryIcon, Empty, Skeleton } from "./ui";
 
-export type Filter = "all" | "in" | "out" | "unpaid" | "receipt";
+export type Filter = "all" | "in" | "out" | "unpaid";
 
 export function LogTab({
   lang, entries, categories, lockedMonths, loading, onEdit, onDelete, onDuplicateLast, initialFilter = "all",
@@ -37,11 +37,10 @@ export function LogTab({
       if (filter === "in" && entry.kind !== "in") return false;
       if (filter === "out" && entry.kind !== "out") return false;
       if (filter === "unpaid" && entry.paid) return false;
-      if (filter === "receipt" && (entry.kind !== "out" || entry.receiptPath || !byId.get(entry.categoryId)?.needsReceipt)) return false;
       if (categoryFilter && entry.categoryId !== categoryFilter) return false;
       if (q) {
         const category = byId.get(entry.categoryId);
-        const hay = `${entry.party} ${entry.description} ${category?.en ?? ""} ${category?.fr ?? ""}`.toLowerCase();
+        const hay = `${entry.party} ${entry.description} ${entry.receiptRef} ${category?.en ?? ""} ${category?.fr ?? ""}`.toLowerCase();
         const amountHit = qCents !== null && qCents > 0 && (entry.totalCents === qCents || entry.netCents === qCents);
         if (!hay.includes(q) && !amountHit) return false;
       }
@@ -62,7 +61,6 @@ export function LogTab({
     { value: "in", label: mt(lang, "moneyIn") },
     { value: "out", label: mt(lang, "moneyOut") },
     { value: "unpaid", label: mt(lang, "unpaid") },
-    { value: "receipt", label: mt(lang, "missingReceipt") },
   ];
 
   return (
@@ -127,7 +125,6 @@ function EntryRow({ lang, entry, category, locked, onEdit, onDelete }: { lang: L
   const setDx = (value: number) => { dxRef.current = value; setDxState(value); };
   const start = useRef<{ x: number; y: number; dx: number } | null>(null);
   const swiping = useRef(false);
-  const missingReceipt = entry.kind === "out" && !entry.receiptPath && category?.needsReceipt;
   const name = entry.party || (category ? (lang === "fr" ? category.fr : category.en) : "—");
 
   const onPointerDown = (event: React.PointerEvent) => {
@@ -174,8 +171,7 @@ function EntryRow({ lang, entry, category, locked, onEdit, onDelete }: { lang: L
             </small>
             <span className="mn-badges">
               {!entry.paid && <span className="mn-badge mn-badge-warn">{mt(lang, "unpaid")}</span>}
-              {missingReceipt && <span className="mn-badge">{mt(lang, "missingReceipt")}</span>}
-              {entry.receiptPath && <span className="mn-badge mn-badge-quiet" title={mt(lang, "receipt")}><Paperclip size={11} /></span>}
+              {entry.receiptRef && <span className="mn-badge mn-badge-quiet" title={mt(lang, "receiptRef")}>{entry.receiptRef}</span>}
               {entry.source === "recurring" && <span className="mn-badge mn-badge-quiet" title={mt(lang, "recurringBadge")}><Repeat size={11} /></span>}
               {locked && <span className="mn-badge mn-badge-quiet" title={mt(lang, "closed")}><Lock size={11} /></span>}
             </span>

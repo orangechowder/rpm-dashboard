@@ -1,4 +1,5 @@
 // Database row → MoneyEntry. Shared by the browser repository and the server routes (no client code here).
+import type { TaxMode } from "./tax";
 import type { MoneyEntry } from "./types";
 
 export type Row = Record<string, unknown>;
@@ -26,9 +27,10 @@ export function rowToEntry(row: Row): MoneyEntry {
     paid: Boolean(row.paid),
     paidOn: row.paid_on ? str(row.paid_on) : null,
     receiptPath: row.receipt_path ? str(row.receipt_path) : null,
+    receiptRef: row.receipt_ref ? str(row.receipt_ref) : "",
     recurringId: row.recurring_id ? str(row.recurring_id) : null,
     occurrenceDate: row.occurrence_date ? str(row.occurrence_date) : null,
-    source: (["manual", "recurring", "import"].includes(str(row.source)) ? str(row.source) : "manual") as MoneyEntry["source"],
+    source: (["manual", "recurring", "import", "wave"].includes(str(row.source)) ? str(row.source) : "manual") as MoneyEntry["source"],
     importKey: row.import_key ? str(row.import_key) : null,
     createdBy: row.created_by ? str(row.created_by) : null,
     createdAt: str(row.created_at),
@@ -39,3 +41,8 @@ export function rowToEntry(row: Row): MoneyEntry {
   };
 }
 
+
+/** A category's tax setting (older rows without it fall back to "taxable yes/no"). */
+export function toTaxMode(value: unknown, taxable = true): TaxMode {
+  return value === "gst_qst" || value === "gst_only" || value === "none" ? value : taxable ? "gst_qst" : "none";
+}

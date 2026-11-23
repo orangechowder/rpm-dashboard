@@ -13,7 +13,9 @@
     "db:sql": "node --env-file=.env.local scripts/db-sql.mjs",
     "check:access": "node --env-file=.env.local scripts/check-access.mjs",
     "check:lock-dry-run": "node --env-file=.env.local scripts/check-lock-dry-run.mjs",
-    "check:money": "node --env-file=.env.local scripts/check-money-access.mjs"
+    "check:money": "node --env-file=.env.local scripts/check-money-access.mjs",
+    "check:wave": "node --env-file=.env.local scripts/check-wave-sync.mjs",
+    "wave:probe": "node --env-file=.env.local node_modules/jiti/lib/jiti-cli.mjs scripts/wave-probe.ts"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.23",
@@ -37,6 +39,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
+    "jiti": "2.7.0",
     "pg": "^8.23.1",
     "tailwindcss": "^4",
     "typescript": "^5",
