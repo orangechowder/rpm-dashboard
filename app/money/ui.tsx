@@ -3,10 +3,11 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
-  Building2, Car, CircleHelp, Coins, Fuel, Hammer, Handshake, HardHat, Landmark, Megaphone, Package, Receipt, Scale, Settings,
+  Building2, CalendarDays, Car, CircleHelp, Coins, Fuel, Hammer, Handshake, HardHat, Landmark, Megaphone, Package, Receipt, Scale, Settings,
   Shield, Smartphone, SprayCan, Truck, User, Wrench, X, Zap, type LucideIcon,
 } from "lucide-react";
 import { formatMoney, type Cents, type Lang } from "../../lib/money/cents";
+import { addDays, formatDate, formatDayMonthYear, readTypedDate, todayISO, type ISODate } from "../../lib/money/dates";
 import { help, mt, type HelpKey } from "./i18n";
 
 const ICONS: Record<string, LucideIcon> = {
@@ -125,6 +126,69 @@ export function Empty({ title, text, children }: { title: string; text?: string;
       <strong>{title}</strong>
       {text && <p>{text}</p>}
       {children}
+    </div>
+  );
+}
+
+/**
+ * A date typed as dd/mm/yyyy (also takes 2026-11-25, "25 nov 2026", "hier"…). Shows the day it understood;
+ * calendar button as backup; ↑/↓ = ±1 day.
+ */
+export function DateField({ lang, label, value, onChange, className = "" }: { lang: Lang; label: ReactNode; value: ISODate; onChange: (date: ISODate) => void; className?: string }) {
+  const id = useId();
+  const pickerRef = useRef<HTMLInputElement>(null);
+  const shown = (date: ISODate) => (date ? formatDayMonthYear(date) : "");
+  const [text, setText] = useState(() => shown(value));
+  const [focused, setFocused] = useState(false);
+  const read = readTypedDate(text, todayISO());
+  const unreadable = text.trim() !== "" && read === null;
+
+  // Value changed from outside (duplicate, calendar…): show it, unless the person is mid-typing.
+  const [seen, setSeen] = useState(value);
+  if (seen !== value) {
+    setSeen(value);
+    if (!focused && read !== value) setText(shown(value));
+  }
+
+  const type = (next: string) => {
+    setText(next);
+    const found = readTypedDate(next, todayISO());
+    if (found) onChange(found);
+  };
+  const setFromPicker = (date: ISODate) => { if (!date) return; onChange(date); setText(shown(date)); };
+
+  return (
+    <div className={`mn-field mn-date-field ${className}`}>
+      <label htmlFor={id}>{label}</label>
+      <div className="mn-date-input">
+        <input
+          id={id}
+          value={text}
+          inputMode="numeric"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder={lang === "fr" ? "jj/mm/aaaa" : "dd/mm/yyyy"}
+          aria-invalid={unreadable}
+          onFocus={(e) => { setFocused(true); e.currentTarget.select(); }}
+          onBlur={() => { setFocused(false); setText(shown(value)); }}
+          onChange={(e) => type(e.target.value)}
+          onKeyDown={(e) => {
+            if ((e.key === "ArrowUp" || e.key === "ArrowDown") && value) {
+              e.preventDefault();
+              setFromPicker(addDays(value, e.key === "ArrowUp" ? 1 : -1));
+            }
+          }}
+        />
+        <button type="button" className="mn-date-cal" aria-label={lang === "fr" ? "Choisir dans le calendrier" : "Pick from calendar"} onClick={() => { try { pickerRef.current?.showPicker(); } catch { pickerRef.current?.focus(); } }}>
+          <CalendarDays size={17} />
+        </button>
+        <input ref={pickerRef} type="date" className="mn-date-native" tabIndex={-1} aria-hidden="true" value={value} onChange={(e) => setFromPicker(e.target.value)} />
+      </div>
+      {unreadable ? (
+        <span className="mn-date-hint mn-date-hint-bad">{lang === "fr" ? "Date illisible. Écrivez jour/mois/année, ex. 25/11/2026." : "Can't read this date. Type day/month/year, e.g. 25/11/2026."}</span>
+      ) : value ? (
+        <span className="mn-date-hint">{formatDate(read && focused ? read : value, lang, { weekday: true })}</span>
+      ) : null}
     </div>
   );
 }

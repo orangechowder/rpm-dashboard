@@ -86,3 +86,129 @@ export function formatDate(date: ISODate, lang: "en" | "fr", options: { weekday?
     year: options.year === false ? undefined : "numeric",
   });
 }
+
+// ---------------------------------------------------------------------------
+// Typed dates: read a date the way it's printed on an invoice, French or English.
+// "25/11/2026", "25-11-26", "2026-11-25", "25 nov. 2026", "Nov 25, 2026", "le 3 mars", "25", "hier"…
+
+const MONTH_WORDS: Array<[string, number]> = [
+  ["january", 1], ["janvier", 1], ["janv", 1], ["jan", 1],
+  ["february", 2], ["fevrier", 2], ["fevr", 2], ["fev", 2], ["feb", 2],
+  ["march", 3], ["mars", 3], ["mar", 3],
+  ["april", 4], ["avril", 4], ["avr", 4], ["apr", 4],
+  ["may", 5], ["mai", 5],
+  ["june", 6], ["juin", 6], ["jun", 6],
+  ["july", 7], ["juillet", 7], ["juil", 7], ["jul", 7],
+  ["august", 8], ["aout", 8], ["aug", 8],
+  ["september", 9], ["septembre", 9], ["sept", 9], ["sep", 9],
+  ["october", 10], ["octobre", 10], ["oct", 10],
+  ["november", 11], ["novembre", 11], ["nov", 11],
+  ["december", 12], ["decembre", 12], ["dec", 12],
+];
+const MONTH_BY_WORD = new Map(MONTH_WORDS);
+const IGNORED_WORDS = new Set([
+  "le", "the", "of", "de", "du", "on", "date", "invoice", "facture",
+  "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+  "mon", "tue", "tues", "wed", "thu", "thurs", "fri", "sat", "sun",
+  "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche",
+  "lun", "mer", "jeu", "ven", "sam", "dim",
+]);
+
+function valid(year: number, month: number, day: number): ISODate | null {
+  if (!Number.isInteger(year) || year < 1900 || year > 2200) return null;
+  if (month < 1 || month > 12 || day < 1 || day > daysInMonth(year, month)) return null;
+  return toISO(year, month, day);
+}
+
+function fullYear(text: string): number {
+  const n = Number(text);
+  return text.length <= 2 ? 2000 + n : n;
+}
+
+/** No year written: this year, unless that lands more than a month in the future (then last year). */
+function guessYear(month: number, day: number, today: ISODate): ISODate | null {
+  const year = parseISO(today).year;
+  const date = valid(year, month, day);
+  if (date && daysBetween(today, date) > 31) return valid(year - 1, month, day);
+  return date ?? valid(year - 1, month, day);
+}
+
+/** Numbers are always read day first (dd/mm/yyyy). */
+function dayMonth(day: number, month: number, year: string | null, today: ISODate): ISODate | null {
+  return year === null ? guessYear(month, day, today) : valid(fullYear(year), month, day);
+}
+
+/** Shows a date as dd/mm/yyyy. */
+export function formatDayMonthYear(date: ISODate): string {
+  const { year, month, day } = parseISO(date);
+  return `${String(day).padStart(2, "0")}/${String(month).padStart(2, "0")}/${year}`;
+}
+
+/** The date typed (dd/mm/yyyy, 2026-11-25, 25 nov 2026, hier…), or null when it can't be read. */
+export function readTypedDate(text: string, today: ISODate): ISODate | null {
+  const clean = text
+    .toLowerCase()
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/(\d)(st|nd|rd|th|er|e)\b/g, "$1")
+    .replace(/[,.]+(?=\s|$)/g, " ")
+    .trim();
+  if (!clean) return null;
+  if (["today", "aujourd'hui", "aujourdhui", "auj", "now", "maintenant"].includes(clean)) return today;
+  if (["yesterday", "hier"].includes(clean)) return addDays(today, -1);
+  if (["tomorrow", "demain"].includes(clean)) return addDays(today, 1);
+
+  // Written month: "25 novembre 2026", "Nov 25, 2026", "3 mars", "novembre 2026" is not a day → rejected.
+  if (/[a-z]/.test(clean)) {
+    const words = clean.split(/[\s/\-.,]+/).filter((w) => w && !IGNORED_WORDS.has(w));
+    const monthWords = words.filter((w) => /^[a-z]+$/.test(w));
+    if (monthWords.length !== 1) return null;
+    const month = MONTH_BY_WORD.get(monthWords[0]) ?? MONTH_WORDS.find(([w]) => w.length >= 3 && monthWords[0].length >= 3 && w.startsWith(monthWords[0]))?.[1];
+    if (!month) return null;
+    const numbers = words.filter((w) => /^\d+$/.test(w));
+    if (numbers.length < 1 || numbers.length > 2) return null;
+    let day: string | undefined;
+    let year: string | null = null;
+    for (const n of numbers) {
+      if (n.length === 4 || (day !== undefined && year === null)) year = n;
+      else if (day === undefined) day = n;
+    }
+    if (day === undefined) return null;
+    const date = year === null ? guessYear(month, Number(day), today) : valid(fullYear(year), month, Number(day));
+    return date;
+  }
+
+  const parts = clean.split(/[\s/\-.]+/).filter(Boolean);
+  if (parts.some((p) => !/^\d+$/.test(p))) return null;
+
+  if (parts.length === 1) {
+    const p = parts[0];
+    if (p.length <= 2) { // just a day: this month
+      const { year, month } = parseISO(today);
+      const date = valid(year, month, Number(p));
+      return date;
+    }
+    if (p.length === 8) { // 20261125 or 25112026
+      const ymd = valid(Number(p.slice(0, 4)), Number(p.slice(4, 6)), Number(p.slice(6, 8)));
+      return ymd ?? dayMonth(Number(p.slice(0, 2)), Number(p.slice(2, 4)), p.slice(4), today);
+    }
+    return null;
+  }
+
+  if (parts.length === 2) {
+    if (parts.some((p) => p.length > 2)) return null;
+    return dayMonth(Number(parts[0]), Number(parts[1]), null, today);
+  }
+
+  if (parts.length === 3) {
+    const [a, b, c] = parts;
+    if (a.length === 4) { // 2026-11-25
+      const date = valid(Number(a), Number(b), Number(c));
+      return date;
+    }
+    if (c.length === 4 || c.length === 2) {
+      if (a.length > 2 || b.length > 2) return null;
+      return dayMonth(Number(a), Number(b), c, today);
+    }
+  }
+  return null;
+}

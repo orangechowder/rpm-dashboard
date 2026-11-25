@@ -10,7 +10,7 @@ import { type EntryInput, type Party } from "../../lib/money/repository";
 import { similarity } from "../../lib/money/matching";
 import type { MoneyCategory, MoneyEntry } from "../../lib/money/types";
 import { mt, paymentLabel } from "./i18n";
-import { CategoryIcon, Help, Sheet, Toggle } from "./ui";
+import { CategoryIcon, DateField, Help, Sheet, Toggle } from "./ui";
 
 export type EntryDraft = Partial<MoneyEntry> & { kind: MoneyKind };
 
@@ -215,7 +215,7 @@ export function EntrySheet({
           </div>
 
             <div className="mn-row-2">
-              <label className="mn-field">{mt(lang, "date")}<input type="date" value={date} onChange={(e) => setDate(e.target.value)} required /></label>
+              <DateField lang={lang} label={mt(lang, "date")} value={date} onChange={setDate} />
               <div className="mn-field">
                 <span className="mn-field-label">{mt(lang, "paidAlready")} <Help lang={lang} topic="paid" /></span>
                 <div className="mn-seg">
@@ -225,7 +225,7 @@ export function EntrySheet({
               </div>
             </div>
             {paid && editing && (
-              <label className="mn-field mn-field-narrow">{mt(lang, "paidOn")}<input type="date" value={paidOn || date} onChange={(e) => setPaidOn(e.target.value)} /></label>
+              <DateField lang={lang} className="mn-field-narrow" label={mt(lang, "paidOn")} value={paidOn || date} onChange={setPaidOn} />
             )}
           </div>
           <div className="mn-entry-col">
