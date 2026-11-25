@@ -9,6 +9,7 @@ import { mt } from "./i18n";
 import { Amount, CategoryIcon, Empty, Skeleton } from "./ui";
 
 export type Filter = "all" | "in" | "out" | "unpaid";
+export type Sort = "newest" | "oldest" | "added" | "biggest" | "smallest";
 
 export function LogTab({
   lang, entries, categories, lockedMonths, loading, onEdit, onDelete, onDuplicateLast, initialFilter = "all",
@@ -27,6 +28,8 @@ export function LogTab({
   const [filter, setFilter] = useState<Filter>(initialFilter);
   const [categoryFilter, setCategoryFilter] = useState("");
   const [days, setDays] = useState(45);
+  const [sort, setSort] = useState<Sort>("newest");
+  const [rowLimit, setRowLimit] = useState(200);
   const byId = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
 
   const visible = useMemo(() => {
@@ -48,14 +51,37 @@ export function LogTab({
     });
   }, [entries, filter, categoryFilter, query, byId]);
 
+  // Date sorts keep the day groups; the other sorts show one flat list (each line shows its date).
+  const grouped = sort === "newest" || sort === "oldest";
   const groups = useMemo(() => {
+    if (!grouped) return [];
+    const dir = sort === "oldest" ? 1 : -1;
     const map = new Map<string, MoneyEntry[]>();
     for (const entry of visible) map.set(entry.date, [...(map.get(entry.date) ?? []), entry]);
-    return [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]));
-  }, [visible]);
+    for (const list of map.values()) list.sort((a, b) => dir * a.createdAt.localeCompare(b.createdAt));
+    return [...map.entries()].sort((a, b) => dir * a[0].localeCompare(b[0]));
+  }, [visible, grouped, sort]);
+
+  const flat = useMemo(() => {
+    if (grouped) return [];
+    const list = [...visible];
+    if (sort === "added") list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    else {
+      const dir = sort === "smallest" ? 1 : -1;
+      list.sort((a, b) => dir * (a.totalCents - b.totalCents) || b.date.localeCompare(a.date));
+    }
+    return list;
+  }, [visible, grouped, sort]);
 
   const shown = groups.slice(0, days);
   const today = todayISO();
+  const sorts: Array<{ value: Sort; label: string }> = [
+    { value: "newest", label: mt(lang, "sortNewest") },
+    { value: "oldest", label: mt(lang, "sortOldest") },
+    { value: "added", label: mt(lang, "sortAdded") },
+    { value: "biggest", label: mt(lang, "sortBiggest") },
+    { value: "smallest", label: mt(lang, "sortSmallest") },
+  ];
   const filters: Array<{ value: Filter; label: string }> = [
     { value: "all", label: mt(lang, "all") },
     { value: "in", label: mt(lang, "moneyIn") },
@@ -78,6 +104,9 @@ export function LogTab({
             <option value="">{mt(lang, "allCategories")}</option>
             {categories.map((c) => <option key={c.id} value={c.id}>{lang === "fr" ? c.fr : c.en}</option>)}
           </select>
+          <select className="mn-chip mn-chip-select" value={sort} onChange={(e) => setSort(e.target.value as Sort)} aria-label={mt(lang, "sortBy")} title={mt(lang, "sortBy")}>
+            {sorts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
         </div>
         {onDuplicateLast && <button type="button" className="mn-ghost mn-dup-last" onClick={onDuplicateLast}><Copy size={15} />{mt(lang, "duplicateLast")}</button>}
       </div>
@@ -86,8 +115,19 @@ export function LogTab({
         <div className="mn-day">{[0, 1, 2, 3].map((i) => <div key={i} className="mn-row-skel"><Skeleton height={36} width={36} radius={10} /><Skeleton height={14} width="45%" /><Skeleton height={14} width={80} /></div>)}</div>
       ) : !entries.some((e) => !e.deletedAt) ? (
         <Empty title={mt(lang, "noEntries")} text={mt(lang, "noEntriesHelp")} />
-      ) : !groups.length ? (
+      ) : !visible.length ? (
         <Empty title={mt(lang, "noMatches")} />
+      ) : !grouped ? (
+        <>
+          <div className="mn-day">
+            <ul className="mn-rows">
+              {flat.slice(0, rowLimit).map((entry) => (
+                <EntryRow key={entry.id} lang={lang} entry={entry} category={byId.get(entry.categoryId)} locked={lockedMonths.has(monthKey(entry.date))} onEdit={onEdit} onDelete={onDelete} showDate={entry.date === today ? (lang === "fr" ? "Aujourd'hui" : "Today") : formatDate(entry.date, lang, { year: entry.date.slice(0, 4) !== today.slice(0, 4) })} />
+              ))}
+            </ul>
+          </div>
+          {flat.length > rowLimit && <button type="button" className="mn-ghost mn-more" onClick={() => setRowLimit((n) => n + 200)}>{mt(lang, "showMoreRows")}</button>}
+        </>
       ) : (
         <>
           {shown.map(([date, list]) => {
@@ -111,7 +151,7 @@ export function LogTab({
               </div>
             );
           })}
-          {groups.length > days && <button type="button" className="mn-ghost mn-more" onClick={() => setDays((d) => d + 60)}>{mt(lang, "showMore")}</button>}
+          {groups.length > days && <button type="button" className="mn-ghost mn-more" onClick={() => setDays((d) => d + 60)}>{mt(lang, sort === "oldest" ? "showMoreRows" : "showMore")}</button>}
         </>
       )}
     </section>
@@ -119,7 +159,7 @@ export function LogTab({
 }
 
 /** One line. Tap to edit; swipe left (phone) to reveal Delete, or use the trash button (desktop). */
-function EntryRow({ lang, entry, category, locked, onEdit, onDelete }: { lang: Lang; entry: MoneyEntry; category?: MoneyCategory; locked: boolean; onEdit: (e: MoneyEntry) => void; onDelete: (e: MoneyEntry) => void }) {
+function EntryRow({ lang, entry, category, locked, onEdit, onDelete, showDate }: { lang: Lang; entry: MoneyEntry; category?: MoneyCategory; locked: boolean; onEdit: (e: MoneyEntry) => void; onDelete: (e: MoneyEntry) => void; showDate?: string }) {
   const [dx, setDxState] = useState(0);
   const dxRef = useRef(0);
   const setDx = (value: number) => { dxRef.current = value; setDxState(value); };
@@ -166,6 +206,7 @@ function EntryRow({ lang, entry, category, locked, onEdit, onDelete }: { lang: L
           <span className="mn-row-text">
             <b>{name}</b>
             <small>
+              {showDate ? `${showDate}${(entry.party && category) || entry.description ? " · " : ""}` : ""}
               {entry.party && category ? (lang === "fr" ? category.fr : category.en) : ""}
               {entry.description ? `${entry.party && category ? " · " : ""}${entry.description}` : ""}
             </small>
