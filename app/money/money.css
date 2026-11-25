@@ -139,6 +139,19 @@
 .mn-receipt-file { display: inline-flex; align-items: center; gap: 4px; color: var(--ink); font-size: 13px; }
 .mn-form-actions { position: sticky; bottom: -18px; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; margin: 0 -18px -18px; padding: 12px 18px 18px; border-top: 1px solid var(--line); background: var(--surface); }
 .mn-form-secondary { display: flex; gap: 8px; margin-right: auto; }
+.mn-entry-cols { display: grid; gap: 16px; }
+.mn-entry-col { display: grid; align-content: start; gap: 16px; min-width: 0; }
+/* Desktop: entry window is wide, in two columns, so everything fits without scrolling. */
+@media (min-width: 701px) {
+  .mn-sheet-entry { width: min(1120px, calc(100vw - 48px)); max-height: calc(100vh - 32px); }
+  .mn-entry-cols { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 28px; }
+  .mn-entry-form { gap: 14px; }
+  .mn-entry-col { gap: 14px; }
+  .mn-entry-form .mn-tiles { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+  .mn-entry-form .mn-tile { grid-auto-flow: column; justify-content: start; align-items: center; min-height: 44px; padding: 8px 10px; gap: 8px; }
+  .mn-entry-form .mn-tile svg { flex-shrink: 0; }
+  .mn-entry-form .mn-chips-scroll { flex-wrap: wrap; overflow: visible; }
+}
 
 /* Toasts */
 .mn-toasts { position: fixed; z-index: 300; left: 50%; bottom: 24px; transform: translateX(-50%); display: grid; gap: 8px; width: min(440px, calc(100vw - 24px)); pointer-events: none; }

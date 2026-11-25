@@ -140,118 +140,123 @@ export function EntrySheet({
   const showTaxLine = split && split.totalCents > 0;
 
   return (
-    <Sheet title={title} onClose={onClose} tone={kind}>
-      <form className="mn-form" onSubmit={(event) => { event.preventDefault(); void submit(false); }}>
+    <Sheet title={title} onClose={onClose} tone={kind} className="mn-sheet-entry">
+      <form className="mn-form mn-entry-form" onSubmit={(event) => { event.preventDefault(); void submit(false); }}>
         {locked && <p className="mn-banner mn-banner-warn"><Lock size={15} aria-hidden="true" />{mt(lang, "lockedMonth")}</p>}
-        <div className="mn-kind-switch" role="radiogroup" aria-label={mt(lang, "money")}>
-          <button type="button" role="radio" aria-checked={kind === "in"} className={kind === "in" ? "mn-kind-in-on" : ""} onClick={() => switchKind("in")}>{mt(lang, "moneyIn")}</button>
-          <button type="button" role="radio" aria-checked={kind === "out"} className={kind === "out" ? "mn-kind-out-on" : ""} onClick={() => switchKind("out")}>{mt(lang, "moneyOut")}</button>
-        </div>
+        <div className="mn-entry-cols">
+          <div className="mn-entry-col">
+            <div className="mn-kind-switch" role="radiogroup" aria-label={mt(lang, "money")}>
+              <button type="button" role="radio" aria-checked={kind === "in"} className={kind === "in" ? "mn-kind-in-on" : ""} onClick={() => switchKind("in")}>{mt(lang, "moneyIn")}</button>
+              <button type="button" role="radio" aria-checked={kind === "out"} className={kind === "out" ? "mn-kind-out-on" : ""} onClick={() => switchKind("out")}>{mt(lang, "moneyOut")}</button>
+          </div>
 
-        <label className="mn-amount-field">
-          <span className="sr-only">{mt(lang, "amount")}</span>
-          <span className="mn-amount-currency" aria-hidden="true">$</span>
-          <input
-            ref={amountRef}
-            data-autofocus
-            inputMode="decimal"
-            autoComplete="off"
-            enterKeyHint="next"
-            placeholder="0.00"
-            value={amountText}
-            onChange={(event) => setAmountText(event.target.value.replace(/[^0-9.,\s]/g, ""))}
-            aria-invalid={Boolean(amountText && (cents === null || cents <= 0))}
-          />
-        </label>
+            <label className="mn-amount-field">
+              <span className="sr-only">{mt(lang, "amount")}</span>
+              <span className="mn-amount-currency" aria-hidden="true">$</span>
+              <input
+                ref={amountRef}
+                data-autofocus
+                inputMode="decimal"
+                autoComplete="off"
+                enterKeyHint="next"
+                placeholder="0.00"
+                value={amountText}
+                onChange={(event) => setAmountText(event.target.value.replace(/[^0-9.,\s]/g, ""))}
+                aria-invalid={Boolean(amountText && (cents === null || cents <= 0))}
+              />
+            </label>
 
-        <div className="mn-tax-box">
-          <Toggle
-            checked={taxesIncluded || manual}
-            onChange={(value) => { setTaxesIncluded(value); setTaxesTouched(true); if (!value) setManual(false); }}
-            label={mt(lang, "taxesIncluded")}
-            help={<Help lang={lang} topic="taxesIncluded" />}
-          />
-          {showTaxLine && (taxesIncluded || manual) && (
-            <p className="mn-tax-line">
-              {mt(lang, "beforeTaxes")} <b>{formatMoney(split.netCents, lang)}</b> · {mt(lang, "gst")} <b>{formatMoney(split.gstCents, lang)}</b> · {mt(lang, "qst")} <b>{formatMoney(split.qstCents, lang)}</b>
-            </p>
-          )}
-          {(taxesIncluded || manual) && cents !== null && cents > 0 && (
-            manual ? (
-              <div className="mn-manual-taxes">
-                <label>{mt(lang, "gst")}<input inputMode="decimal" value={gstText} onChange={(e) => setGstText(e.target.value)} /></label>
-                <label>{mt(lang, "qst")}<input inputMode="decimal" value={qstText} onChange={(e) => setQstText(e.target.value)} /></label>
+            <div className="mn-tax-box">
+              <Toggle
+                checked={taxesIncluded || manual}
+                onChange={(value) => { setTaxesIncluded(value); setTaxesTouched(true); if (!value) setManual(false); }}
+                label={mt(lang, "taxesIncluded")}
+                help={<Help lang={lang} topic="taxesIncluded" />}
+              />
+              {showTaxLine && (taxesIncluded || manual) && (
+                <p className="mn-tax-line">
+                  {mt(lang, "beforeTaxes")} <b>{formatMoney(split.netCents, lang)}</b> · {mt(lang, "gst")} <b>{formatMoney(split.gstCents, lang)}</b> · {mt(lang, "qst")} <b>{formatMoney(split.qstCents, lang)}</b>
+                </p>
+              )}
+              {(taxesIncluded || manual) && cents !== null && cents > 0 && (
+                manual ? (
+                  <div className="mn-manual-taxes">
+                    <label>{mt(lang, "gst")}<input inputMode="decimal" value={gstText} onChange={(e) => setGstText(e.target.value)} /></label>
+                    <label>{mt(lang, "qst")}<input inputMode="decimal" value={qstText} onChange={(e) => setQstText(e.target.value)} /></label>
+                  </div>
+                ) : (
+                  <button type="button" className="mn-link" onClick={() => { const s = splitTaxesIncluded(cents); setManual(true); setGstText(centsToInput(s.gstCents, lang)); setQstText(centsToInput(s.qstCents, lang)); }}>{mt(lang, "editTaxes")}</button>
+                )
+              )}
+          </div>
+
+            <div className="mn-field mn-party">
+              <label htmlFor="mn-party">{kind === "in" ? mt(lang, "whoClient") : mt(lang, "whoSupplier")}</label>
+              <input
+                id="mn-party"
+                value={party}
+                autoComplete="off"
+                onFocus={() => setPartyOpen(true)}
+                onBlur={() => window.setTimeout(() => setPartyOpen(false), 150)}
+                onChange={(event) => { setParty(event.target.value); setPartyOpen(true); }}
+                onKeyDown={(event) => { if (event.key === "Enter" && partyOpen && suggestions[0] && party.trim()) { event.preventDefault(); pickParty(suggestions[0]); } }}
+                role="combobox"
+                aria-expanded={partyOpen && suggestions.length > 0}
+                aria-controls="mn-party-list"
+                aria-autocomplete="list"
+              />
+              {partyOpen && suggestions.length > 0 && (
+                <ul id="mn-party-list" role="listbox" className="mn-suggest">
+                  {suggestions.map((name) => (
+                    <li key={name} role="option" aria-selected={false} onMouseDown={(event) => { event.preventDefault(); pickParty(name); }}>{name}</li>
+                  ))}
+                </ul>
+              )}
+          </div>
+
+            <div className="mn-row-2">
+              <label className="mn-field">{mt(lang, "date")}<input type="date" value={date} onChange={(e) => setDate(e.target.value)} required /></label>
+              <div className="mn-field">
+                <span className="mn-field-label">{mt(lang, "paidAlready")} <Help lang={lang} topic="paid" /></span>
+                <div className="mn-seg">
+                  <button type="button" aria-pressed={paid} className={paid ? "mn-seg-on" : ""} onClick={() => setPaid(true)}>{mt(lang, "paidYes")}</button>
+                  <button type="button" aria-pressed={!paid} className={!paid ? "mn-seg-on mn-seg-warn" : ""} onClick={() => setPaid(false)}>{mt(lang, "paidNo")}</button>
+                </div>
               </div>
-            ) : (
-              <button type="button" className="mn-link" onClick={() => { const s = splitTaxesIncluded(cents); setManual(true); setGstText(centsToInput(s.gstCents, lang)); setQstText(centsToInput(s.qstCents, lang)); }}>{mt(lang, "editTaxes")}</button>
-            )
-          )}
-        </div>
-
-        <fieldset className="mn-field">
-          <legend>{mt(lang, "category")}</legend>
-          <div className="mn-tiles">
-            {tiles.map((c) => (
-              <button key={c.id} type="button" className={`mn-tile ${categoryId === c.id ? "mn-tile-on" : ""}`} aria-pressed={categoryId === c.id} onClick={() => pickCategory(c.id, true)}>
-                <CategoryIcon name={c.icon} size={20} />
-                <span>{lang === "fr" ? c.fr : c.en}</span>
-              </button>
-            ))}
-          </div>
-        </fieldset>
-
-        <div className="mn-field mn-party">
-          <label htmlFor="mn-party">{kind === "in" ? mt(lang, "whoClient") : mt(lang, "whoSupplier")}</label>
-          <input
-            id="mn-party"
-            value={party}
-            autoComplete="off"
-            onFocus={() => setPartyOpen(true)}
-            onBlur={() => window.setTimeout(() => setPartyOpen(false), 150)}
-            onChange={(event) => { setParty(event.target.value); setPartyOpen(true); }}
-            onKeyDown={(event) => { if (event.key === "Enter" && partyOpen && suggestions[0] && party.trim()) { event.preventDefault(); pickParty(suggestions[0]); } }}
-            role="combobox"
-            aria-expanded={partyOpen && suggestions.length > 0}
-            aria-controls="mn-party-list"
-            aria-autocomplete="list"
-          />
-          {partyOpen && suggestions.length > 0 && (
-            <ul id="mn-party-list" role="listbox" className="mn-suggest">
-              {suggestions.map((name) => (
-                <li key={name} role="option" aria-selected={false} onMouseDown={(event) => { event.preventDefault(); pickParty(name); }}>{name}</li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        <div className="mn-row-2">
-          <label className="mn-field">{mt(lang, "date")}<input type="date" value={date} onChange={(e) => setDate(e.target.value)} required /></label>
-          <div className="mn-field">
-            <span className="mn-field-label">{mt(lang, "paidAlready")} <Help lang={lang} topic="paid" /></span>
-            <div className="mn-seg">
-              <button type="button" aria-pressed={paid} className={paid ? "mn-seg-on" : ""} onClick={() => setPaid(true)}>{mt(lang, "paidYes")}</button>
-              <button type="button" aria-pressed={!paid} className={!paid ? "mn-seg-on mn-seg-warn" : ""} onClick={() => setPaid(false)}>{mt(lang, "paidNo")}</button>
             </div>
+            {paid && editing && (
+              <label className="mn-field mn-field-narrow">{mt(lang, "paidOn")}<input type="date" value={paidOn || date} onChange={(e) => setPaidOn(e.target.value)} /></label>
+            )}
+          </div>
+          <div className="mn-entry-col">
+            <fieldset className="mn-field">
+              <legend>{mt(lang, "category")}</legend>
+              <div className="mn-tiles">
+                {tiles.map((c) => (
+                  <button key={c.id} type="button" className={`mn-tile ${categoryId === c.id ? "mn-tile-on" : ""}`} aria-pressed={categoryId === c.id} onClick={() => pickCategory(c.id, true)}>
+                    <CategoryIcon name={c.icon} size={20} />
+                    <span>{lang === "fr" ? c.fr : c.en}</span>
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+
+            <fieldset className="mn-field">
+              <legend>{mt(lang, "howPaid")}</legend>
+              <div className="mn-chips mn-chips-scroll">
+                {PAYMENT_METHODS.map((m) => (
+                  <button key={m} type="button" className={`mn-chip ${method === m ? "mn-chip-on" : ""}`} aria-pressed={method === m} onClick={() => setMethod(method === m ? null : m)}>{paymentLabel(lang, m)}</button>
+                ))}
+              </div>
+            </fieldset>
+
+            <label className="mn-field">{mt(lang, "receiptRef")} <Help lang={lang} topic="receiptRef" />
+              <input value={receiptRef} maxLength={120} placeholder={mt(lang, "receiptRefExample")} onChange={(e) => setReceiptRef(e.target.value)} />
+            </label>
+
+            <label className="mn-field">{mt(lang, "note")}<input value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} /></label>
           </div>
         </div>
-        {paid && editing && (
-          <label className="mn-field mn-field-narrow">{mt(lang, "paidOn")}<input type="date" value={paidOn || date} onChange={(e) => setPaidOn(e.target.value)} /></label>
-        )}
-
-        <fieldset className="mn-field">
-          <legend>{mt(lang, "howPaid")}</legend>
-          <div className="mn-chips mn-chips-scroll">
-            {PAYMENT_METHODS.map((m) => (
-              <button key={m} type="button" className={`mn-chip ${method === m ? "mn-chip-on" : ""}`} aria-pressed={method === m} onClick={() => setMethod(method === m ? null : m)}>{paymentLabel(lang, m)}</button>
-            ))}
-          </div>
-        </fieldset>
-
-        <label className="mn-field">{mt(lang, "receiptRef")} <Help lang={lang} topic="receiptRef" />
-          <input value={receiptRef} maxLength={120} placeholder={mt(lang, "receiptRefExample")} onChange={(e) => setReceiptRef(e.target.value)} />
-        </label>
-
-        <label className="mn-field">{mt(lang, "note")}<input value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} /></label>
 
         {problem && <p className="mn-problem" role="alert">{problem}</p>}
 

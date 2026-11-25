@@ -55,13 +55,13 @@ export function Skeleton({ height = 16, width = "100%", radius = 6 }: { height?:
 }
 
 /** Bottom sheet on phones, centred panel on desktop. */
-export function Sheet({ title, onClose, children, wide = false, tone }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean; tone?: "in" | "out" }) {
+export function Sheet({ title, onClose, children, wide = false, tone, className = "" }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean; tone?: "in" | "out"; className?: string }) {
   return (
     <Dialog.Root open onOpenChange={(open) => { if (!open) onClose(); }}>
       <Dialog.Portal>
         <Dialog.Overlay className="mn-sheet-backdrop" />
         <Dialog.Content
-          className={`mn-sheet ${wide ? "mn-sheet-wide" : ""} ${tone ? `mn-sheet-${tone}` : ""}`}
+          className={`mn-sheet ${wide ? "mn-sheet-wide" : ""} ${tone ? `mn-sheet-${tone}` : ""} ${className}`}
           aria-describedby={undefined}
           onPointerDownOutside={(event) => event.preventDefault()}
           onOpenAutoFocus={(event) => {
