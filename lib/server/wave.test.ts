@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { decrypt, encrypt, graphqlClient, readState, refreshTokens, signState, WaveError } from "./wave";
+import { decrypt, encrypt, graphqlClient, looksLikeProExpired, readState, refreshTokens, signState, WaveError } from "./wave";
 import { needsAlert, type Connection } from "./wave-runner";
 
 const KEY = Buffer.alloc(32, 7).toString("base64");
@@ -67,6 +67,10 @@ describe("Wave client", () => {
 describe("alerts", () => {
   const conn = (over: Partial<Connection>): Connection => ({ business_id: "b", business_name: "", access_token_enc: "", refresh_token_enc: null, token_expires_at: null, scope: "", connected_by: null, connected_at: "", approved_at: "2026-12-01T00:00:00Z", approved_by: null, sync_from: null, csv_until: null, fee_account_id: null, fee_baseline_cents: null, status: "connected", last_sync_at: null, last_success_at: "2026-12-10T00:00:00Z", last_error: null, last_error_at: null, alert_sent_at: null, ...over });
   const now = Date.parse("2026-12-10T12:00:00Z");
+  it("Wave Pro expired: one email only, until Wave is connected again", () => {
+    expect(needsAlert(conn({ status: "pro_expired" }), now)).toMatch(/Wave Pro has expired/);
+    expect(needsAlert(conn({ status: "pro_expired", alert_sent_at: "2026-11-01T00:00:00Z" }), now)).toBeNull(); // weeks later: still quiet
+  });
   it("alerts when the connection expired or nothing synced for 24 h, at most once a day", () => {
     expect(needsAlert(conn({}), now)).toBeNull();
     expect(needsAlert(conn({ status: "expired" }), now)).toMatch(/expired/);
@@ -88,5 +92,24 @@ describe("token exchange", () => {
     expect(String(fetcher.mock.calls[0][1].body)).toContain("client_id=id&client_secret=secret");
     expect(fetcher.mock.calls[1][1].headers.Authorization).toBe(`Basic ${Buffer.from("id:secret").toString("base64")}`);
     expect(String(fetcher.mock.calls[1][1].body)).not.toContain("client_secret");
+  });
+});
+
+describe("Wave Pro expired", () => {
+  const fail = async (response: Response) => {
+    const e = await graphqlClient("t", vi.fn().mockResolvedValue(response) as unknown as typeof fetch)("query { x }").catch((x) => x);
+    return (e as WaveError).code;
+  };
+  it("is told apart from an expired sign-in", async () => {
+    expect(await fail(json(402, {}))).toBe("subscription");
+    expect(await fail(json(403, { error: "access_denied", message: "Your Wave Pro subscription has ended" }))).toBe("subscription");
+    expect(await fail(json(200, { errors: [{ message: "This feature requires a Pro subscription", extensions: { code: "FORBIDDEN" } }] }))).toBe("subscription");
+    expect(await fail(json(401, { message: "token expired" }))).toBe("auth");
+    expect(await fail(json(200, { errors: [{ message: "Not authorized for estimates", extensions: { code: "FORBIDDEN" } }] }))).toBe("forbidden");
+  });
+  it("token refresh refused with access_denied = Pro expired", async () => {
+    const e = await refreshTokens("r1", vi.fn().mockResolvedValue(json(400, { error: "access_denied" })) as unknown as typeof fetch).catch((x) => x);
+    expect((e as WaveError).code).toBe("subscription");
+    expect(looksLikeProExpired("invalid_grant")).toBe(false);
   });
 });

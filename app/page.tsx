@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentPropsWithoutRef, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentPropsWithoutRef, type ReactNode } from "react";
 import Image from "next/image";
 import dynamic from "next/dynamic";
 import { Activity, ArrowRight, ArrowUpRight, CalendarDays, ChartNoAxesCombined, CircleDollarSign, ChevronDown, Clock3, FileText, Gauge, LayoutDashboard, ListFilter, ListTodo, Menu, MoreHorizontal, Plus, Search, Truck, Users, Wallet, Wrench, X, type LucideIcon } from "lucide-react";
@@ -12,6 +12,7 @@ import { passwordProblem, passwordProblemText, staffEmail, type PasswordProblem 
 import { ThemeToggle } from "./theme-provider";
 import { ModalFrame } from "./modal-frame";
 import { ResponsiveTable } from "./responsive-table";
+import { addClient as addSharedClient, loadClients, moveBrowserList, proposeClient, removeClient as removeSharedClient, renameClient, type ClientRow } from "../lib/clients/repository";
 
 // Money / Argent (Admins only) is loaded on demand so other pages don't download its charts and exports.
 const MoneyApp = dynamic(() => import("./money/money-app"), { ssr: false, loading: () => <div className="money-loading" aria-busy="true" /> });
@@ -751,6 +752,8 @@ export default function Home() {
   const [workOrderUnitSearch, setWorkOrderUnitSearch] = useState("");
   const [workOrderUnitPickerOpen, setWorkOrderUnitPickerOpen] = useState(false);
   const [clientData, setClientData] = useState<string[]>(() => loadStored("rpm-diesel-clients", defaultClients));
+  // Shared list in Supabase (null = not loaded / table not installed yet → the browser's own list is used).
+  const [clientRows, setClientRows] = useState<ClientRow[] | null>(null);
   const [editingClient, setEditingClient] = useState<string | null>(null);
   const [editingClientName, setEditingClientName] = useState("");
   const [modal, setModal] = useState<"job" | "unit" | "detail" | "history" | null>(null);
@@ -1371,21 +1374,30 @@ export default function Home() {
     }
     setUserAccounts((current) => current.filter((candidate) => candidate.id !== id));
   };
+  const sharedClient = (name: string) => clientRows?.find((row) => !row.removed && !row.pending && row.name === name);
+  const changeSharedClients = (change: () => Promise<unknown>) => {
+    void change().catch((error: Error) => reportActionError(error.message)).finally(() => { void refreshClients(); });
+  };
   const saveClientEdit = () => {
     if (!isAdmin) return;
     const nextName = editingClientName.trim();
     if (!editingClient || !nextName) return;
-    setClientData((current) => current.map((client) => client === editingClient ? nextName : client));
+    const row = sharedClient(editingClient);
+    if (row) changeSharedClients(() => renameClient(row.id, nextName));
+    else setClientData((current) => current.map((client) => client === editingClient ? nextName : client));
     setEditingClient(null);
     setEditingClientName("");
   };
   const removeClient = (client: string) => {
     if (!isAdmin || !confirmDeletion("client")) return;
-    setClientData((current) => current.filter((item) => item !== client));
+    const row = sharedClient(client);
+    if (row) changeSharedClients(() => removeSharedClient(row.id));
+    else setClientData((current) => current.filter((item) => item !== client));
   };
   const addClientName = (rawName: string) => {
     const name = rawName.trim();
     if (!name) return;
+    if (clientRows) changeSharedClients(() => (isAdmin ? addSharedClient(name, clientRows) : proposeClient(name, clientRows)));
     if (!clientData.includes(name)) setClientData((current) => [name, ...current]);
     setForm((current) => ({ ...current, client: name }));
     setUnitClientSearch("");
@@ -1412,6 +1424,31 @@ export default function Home() {
   useEffect(() => {
     window.localStorage.setItem("rpm-diesel-clients", JSON.stringify(clientData));
   }, [clientData]);
+  // Shared client list: every device shows the same one. The first time an Admin opens the dashboard after the
+  // update, this browser's list is copied in (names already there, even removed ones, are skipped).
+  const refreshClients = useCallback(async () => {
+    const rows = await loadClients();
+    if (!rows) return;
+    setClientRows(rows);
+    setClientData(rows.filter((row) => !row.removed && !row.pending).map((row) => row.name));
+  }, []);
+  useEffect(() => {
+    if (!currentAccount) return;
+    let cancelled = false;
+    void (async () => {
+      const rows = await loadClients();
+      if (!rows || cancelled) return;
+      if (isAdmin && !window.localStorage.getItem("rpm-diesel-clients-moved")) {
+        try {
+          await moveBrowserList(loadStored<string[]>("rpm-diesel-clients", defaultClients), rows);
+          window.localStorage.setItem("rpm-diesel-clients-moved", new Date().toISOString());
+        } catch (error) { reportActionError((error as Error).message); }
+      }
+      if (!cancelled) await refreshClients();
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per signed-in account
+  }, [currentAccount?.id, isAdmin, refreshClients]);
   useEffect(() => {
     window.localStorage.setItem("rpm-diesel-meter-overrides", JSON.stringify(meterOverrides));
   }, [meterOverrides]);

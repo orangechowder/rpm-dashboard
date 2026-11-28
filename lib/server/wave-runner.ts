@@ -5,7 +5,8 @@ import { parseMoney } from "../money/cents";
 import { todayISO, type ISODate } from "../money/dates";
 import { normalizeDoc, planSync, type ExistingEntry, type MapRow, type Plan, type ReviewResolution, type WaveAccountRef } from "../money/wave-sync";
 import { serviceClient } from "./staff-auth";
-import { allPages, decrypt, encrypt, graphqlClient, Q_ACCOUNTS, Q_ESTIMATES, Q_INVOICES, refreshTokens, waveConfig, WaveError, type GraphQL } from "./wave";
+import { syncWaveClientsSafely, type ClientSyncSummary } from "./wave-clients";
+import { allPages, decrypt, encrypt, graphqlClient, PRO_EXPIRED_MESSAGE, Q_ACCOUNTS, Q_ESTIMATES, Q_INVOICES, refreshTokens, waveConfig, WaveError, type GraphQL } from "./wave";
 
 export type Connection = {
   business_id: string; business_name: string; access_token_enc: string; refresh_token_enc: string | null; token_expires_at: string | null;
@@ -33,15 +34,27 @@ export async function accessToken(db: SupabaseClient, conn: Connection, fetcher:
     }).eq("id", 1);
     return t.accessToken;
   } catch (e) {
+    if (e instanceof WaveError && e.code === "subscription") { await markProExpired(db, conn); throw e; }
     await db.from("money_wave_connection").update({ status: "expired", last_error: "The Wave connection expired. Connect again.", last_error_at: new Date().toISOString() }).eq("id", 1);
     throw e instanceof WaveError ? e : new WaveError("auth", String(e));
   }
 }
 
+/** Wave Pro ran out: say so plainly, stop the nightly retries, and allow exactly one alert email (until reconnected). */
+export async function markProExpired(db: SupabaseClient, conn: Pick<Connection, "status">) {
+  await db.from("money_wave_connection").update({
+    status: "pro_expired", last_error: PRO_EXPIRED_MESSAGE, last_error_at: new Date().toISOString(),
+    ...(conn.status !== "pro_expired" ? { alert_sent_at: null } : {}),
+  }).eq("id", 1);
+}
+
 const cents = (decimal: unknown) => (decimal === null || decimal === undefined ? null : parseMoney(String(decimal)));
 
 export async function fetchWave(gql: GraphQL, businessId: string) {
-  const rawAccounts = await allPages(gql, Q_ACCOUNTS, businessId, "accounts");
+  // account:read is always granted: if even the accounts are refused, Wave has shut the business out (Pro expired).
+  const rawAccounts = await allPages(gql, Q_ACCOUNTS, businessId, "accounts").catch((e) => {
+    throw e instanceof WaveError && e.code === "forbidden" ? new WaveError("subscription", e.message) : e;
+  });
   const accounts = new Map<string, WaveAccountRef>();
   for (const a of rawAccounts) {
     accounts.set(String(a.id), { id: String(a.id), name: String(a.name ?? ""), subtype: String((a.subtype as { value?: string } | null)?.value ?? "") || null });
@@ -96,6 +109,7 @@ export type RunSummary = {
   feeBalanceCents: number | null; feeBaselineCents: number | null; syncFrom: string; csvUntil: string | null; newMappings: number;
   invoices: number; estimates: number; estimatesReadable: boolean; samples: Array<{ op: string; date: string; party: string; description: string; category: string; total: number; before?: number }>;
   failed: number; wave: { calls: number; retries: number; rateHeaders: Record<string, string> };
+  clients?: ClientSyncSummary | { error: string };
 };
 
 export async function runWaveSync(options: { mode: "dry-run" | "sync"; trigger: "manual" | "cron" | "approve"; by: string | null; fetcher?: typeof fetch }): Promise<RunSummary> {
@@ -150,11 +164,14 @@ export async function runWaveSync(options: { mode: "dry-run" | "sync"; trigger: 
       await db.from("money_wave_connection").update({ last_sync_at: new Date().toISOString(), fee_account_id: wave.feeAccountIds[0] ?? null }).eq("id", 1);
     }
 
+    // Wave customers → client list (add only; only after its own preview was approved). A failure here never stops Money.
+    const clients = await syncWaveClientsSafely(db, gql, conn.business_id, { apply: options.mode === "sync" });
+
     const label = (o: Plan["ops"][number]) => (o.op === "insert" || o.op === "update" ? o.row : null);
     const summary: RunSummary = {
       mode: options.mode, counts: plan.counts, months: plan.months, review: plan.review, feeDeltaCents: plan.feeDeltaCents,
       feeBalanceCents: wave.feeBalanceCents, feeBaselineCents: conn.fee_baseline_cents, syncFrom, csvUntil, newMappings: plan.newMapRows.length,
-      invoices: wave.invoiceCount, estimates: wave.estimateCount, estimatesReadable: wave.estimatesReadable, failed, wave: stats,
+      invoices: wave.invoiceCount, estimates: wave.estimateCount, estimatesReadable: wave.estimatesReadable, failed, wave: stats, clients,
       samples: plan.ops.filter((o) => o.op !== "link").slice(0, 300).map((o) => {
         const r = label(o);
         const before = o.op === "update" || o.op === "trash" ? o.before : null;
@@ -166,7 +183,8 @@ export async function runWaveSync(options: { mode: "dry-run" | "sync"; trigger: 
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     await finish({ ok: false, error: message.slice(0, 500) });
-    await db.from("money_wave_connection").update({ last_error: message.slice(0, 500), last_error_at: new Date().toISOString(), ...(e instanceof WaveError && e.code === "auth" ? { status: "expired" } : {}) }).eq("id", 1);
+    if (e instanceof WaveError && e.code === "subscription") await markProExpired(db, conn);
+    else await db.from("money_wave_connection").update({ last_error: message.slice(0, 500), last_error_at: new Date().toISOString(), ...(e instanceof WaveError && e.code === "auth" ? { status: "expired" } : {}) }).eq("id", 1);
     throw e;
   }
 }
@@ -174,6 +192,8 @@ export async function runWaveSync(options: { mode: "dry-run" | "sync"; trigger: 
 // ---- alerts --------------------------------------------------------------------------------------------
 export function needsAlert(conn: Connection | null, now = Date.now()): string | null {
   if (!conn || !conn.approved_at) return null;
+  // Wave Pro expired: one email only; it's re-armed when Wave is connected again.
+  if (conn.status === "pro_expired") return conn.alert_sent_at ? null : PRO_EXPIRED_MESSAGE.replace("click", "open Money → Settings and click");
   const quiet = !conn.alert_sent_at || now - Date.parse(conn.alert_sent_at) > 24 * 3600_000;
   if (!quiet) return null;
   if (conn.status === "expired") return "The Wave connection expired. Open Money → Settings and click “Connect Wave” again.";

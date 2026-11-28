@@ -6,6 +6,7 @@ import { formatMoney, parseMoney, centsToInput, type Lang } from "../../lib/mone
 import { formatDate, monthLabel } from "../../lib/money/dates";
 import type { MoneyCategory } from "../../lib/money/types";
 import { supabase } from "../../lib/supabase";
+import { decidePending } from "../../lib/clients/repository";
 import { Help } from "./ui";
 
 const L = (lang: Lang, en: string, fr: string) => (lang === "fr" ? fr : en);
@@ -47,7 +48,7 @@ export async function loadWaveAttention(): Promise<WaveAttention[]> {
   const out: WaveAttention[] = [];
   const c = status.connection;
   const stale = c.approvedAt && (!c.lastSuccessAt || Date.now() - Date.parse(c.lastSuccessAt) > 26 * 3600_000);
-  if (c.status === "expired" || stale) out.push({ ref: "connection", kind: "connection", title: c.status === "expired" ? "expired" : "stale", amountCents: null, details: { lastError: c.lastError, lastSuccessAt: c.lastSuccessAt } });
+  if (c.status === "expired" || c.status === "pro_expired" || stale) out.push({ ref: "connection", kind: "connection", title: c.status === "expired" || c.status === "pro_expired" ? c.status : "stale", amountCents: null, details: { lastError: c.lastError, lastSuccessAt: c.lastSuccessAt } });
   const { data } = await supabase!.from("money_wave_review").select("ref,kind,title,details,amount_cents").is("resolved_at", null).order("first_seen_at");
   for (const r of data ?? []) out.push({ ref: String(r.ref), kind: r.kind as ReviewItem["kind"], title: String(r.title ?? ""), amountCents: r.amount_cents === null ? null : Number(r.amount_cents), details: (r.details ?? {}) as Record<string, unknown> });
   return out;
@@ -72,7 +73,9 @@ const monthName = (m: string, lang: Lang) => `${monthLabel(Number(m.slice(5, 7))
 export function waveAttentionText(item: WaveAttention, lang: Lang, categoryName: (id: string) => string): { title: string; detail: string } {
   const $ = (c: number | null) => (c === null ? "" : formatMoney(c, lang));
   switch (item.kind) {
-    case "connection": return item.title === "expired"
+    case "connection": return item.title === "pro_expired"
+      ? { title: L(lang, "Wave Pro has expired", "Wave Pro est expiré"), detail: L(lang, "Wave stopped sharing data. Renew Wave Pro, then connect Wave again in Settings. The nightly sync is paused until then.", "Wave ne partage plus les données. Renouvelez Wave Pro, puis reconnectez Wave dans Réglages. La synchro de nuit est en pause d'ici là.") }
+      : item.title === "expired"
       ? { title: L(lang, "Wave connection expired", "Connexion Wave expirée"), detail: L(lang, "Connect Wave again in Settings.", "Reconnectez Wave dans Réglages.") }
       : { title: L(lang, "Wave hasn't synced for over a day", "Wave n'a pas synchronisé depuis plus d'un jour"), detail: String(item.details.lastError ?? L(lang, "Open Settings → Wave.", "Ouvrez Réglages → Wave.")) };
     case "unmapped": return { title: L(lang, `Wave item “${item.title}” needs a category`, `Article Wave « ${item.title} » : choisir une catégorie`), detail: L(lang, `${item.details.payments ?? "?"} payment(s) waiting · ${$(item.amountCents)}`, `${item.details.payments ?? "?"} paiement(s) en attente · ${$(item.amountCents)}`) };
@@ -161,13 +164,15 @@ export function WaveCard({ lang, categories, waveResult, onSynced }: { lang: Lan
       ) : (
         <>
           <p className="mn-wave-status">
-            <span className={`mn-pill ${c.status === "connected" ? "mn-pill-ok" : "mn-pill-bad"}`}>{c.status === "connected" ? L(lang, "Connected", "Connecté") : c.status === "expired" ? L(lang, "Expired", "Expiré") : L(lang, "Error", "Erreur")}</span>
+            <span className={`mn-pill ${c.status === "connected" ? "mn-pill-ok" : "mn-pill-bad"}`}>{c.status === "connected" ? L(lang, "Connected", "Connecté") : c.status === "pro_expired" ? L(lang, "Wave Pro expired", "Wave Pro expiré") : c.status === "expired" ? L(lang, "Expired", "Expiré") : L(lang, "Error", "Erreur")}</span>
             <b>{c.businessName}</b>
             <span className="mn-muted">{c.approvedAt ? L(lang, `Last synced ${ago(c.lastSuccessAt, lang)}`, `Dernière synchro ${ago(c.lastSuccessAt, lang)}`) : L(lang, "Not syncing yet: preview first", "Pas encore de synchro : aperçu d'abord")}</span>
             {lastSync && lastSync.ok && <span className="mn-muted">· {L(lang, `${lastSync.added} added, ${lastSync.updated} updated`, `${lastSync.added} ajoutées, ${lastSync.updated} modifiées`)}</span>}
           </p>
-          {c.lastError && <p className="mn-banner mn-banner-warn"><TriangleAlert size={15} aria-hidden="true" /> {c.lastError}</p>}
-          {c.status === "expired" && <button type="button" className="mn-primary" onClick={() => void connect()}>{L(lang, "Connect Wave again", "Reconnecter Wave")}</button>}
+          {c.status === "pro_expired"
+            ? <p className="mn-banner mn-banner-error" role="alert"><TriangleAlert size={15} aria-hidden="true" /> {L(lang, "Wave Pro has expired, so Wave stopped sharing data. Renew Wave Pro in Wave, then click “Connect Wave again”. The nightly sync is paused until then; nothing in Money was changed.", "Wave Pro est expiré, alors Wave ne partage plus les données. Renouvelez Wave Pro dans Wave, puis cliquez « Reconnecter Wave ». La synchro de nuit est en pause d'ici là; rien n'a changé dans Argent.")}</p>
+            : c.lastError && <p className="mn-banner mn-banner-warn"><TriangleAlert size={15} aria-hidden="true" /> {c.lastError}</p>}
+          {(c.status === "expired" || c.status === "pro_expired") && <button type="button" className="mn-primary" onClick={() => void connect()}>{L(lang, "Connect Wave again", "Reconnecter Wave")}</button>}
           <div className="mn-inline-actions">
             {c.approvedAt && <button type="button" className="mn-primary" disabled={busy !== null} onClick={() => void syncNow()}><RefreshCw size={15} aria-hidden="true" />{busy === "sync" ? L(lang, "Syncing…", "Synchronisation…") : L(lang, "Sync now", "Synchroniser")}</button>}
             <button type="button" className={c.approvedAt ? "mn-ghost" : "mn-primary"} disabled={busy !== null} onClick={() => void dryRun()}>{busy === "dry" ? L(lang, "Checking Wave…", "Vérification de Wave…") : L(lang, "Preview (dry run)", "Aperçu (essai à blanc)")}</button>
@@ -236,6 +241,8 @@ export function WaveCard({ lang, categories, waveResult, onSynced }: { lang: Lan
             </div>
           )}
 
+          <WaveClientsCard lang={lang} />
+
           {status.runs.length > 0 && (
             <details className="mn-review-list"><summary>{L(lang, "Recent runs", "Dernières exécutions")}</summary>
               <ul className="mn-plain-list">{status.runs.map((r) => (
@@ -248,5 +255,108 @@ export function WaveCard({ lang, categories, waveResult, onSynced }: { lang: Lan
         </>
       )}
     </section>
+  );
+}
+
+// ---- Wave customers → shared client list (add only) ----------------------------------------------------
+type ClientSummary = { mode: string; applied: boolean; at: string; counts: { wave: number; archived: number; alreadyThere: number; add: number; check: number }; add: Array<{ waveId: string; name: string }>; check: Array<{ waveId: string; waveName: string; similar: string[] }>; added: number; linked: number };
+type ClientState = { approved_at: string | null; approved_by: string | null; last_run_at: string | null; last_summary: ClientSummary | null; last_error: string | null };
+
+function WaveClientsCard({ lang }: { lang: Lang }) {
+  const [state, setState] = useState<ClientState | null>(null);
+  const [summary, setSummary] = useState<ClientSummary | null>(null);
+  const [done, setDone] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [proposed, setProposed] = useState<Array<{ id: string; name: string; by: string | null }>>([]);
+  const refresh = useCallback(async () => {
+    try {
+      const { data: waiting } = await supabase!.from("clients").select("id,name,created_by").eq("pending", true).is("removed_at", null).order("created_at");
+      setProposed((waiting ?? []).map((w) => ({ id: String(w.id), name: String(w.name), by: w.created_by ? String(w.created_by) : null })));
+      const r = await api<{ state: ClientState | null }>("/api/clients/wave");
+      setState(r.state);
+      setSummary((s) => s ?? r.state?.last_summary ?? null);
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+  }, []);
+  useEffect(() => { const t = setTimeout(() => void refresh(), 0); return () => clearTimeout(t); }, [refresh]);
+  const run = async (label: string, fn: () => Promise<void>) => {
+    setBusy(label); setError(null);
+    try { await fn(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(null); }
+  };
+  const post = (mode: "preview" | "approve") => run(mode, async () => {
+    const { summary: s } = await api<{ summary: ClientSummary }>("/api/clients/wave", { method: "POST", body: JSON.stringify({ mode }) });
+    setSummary(s); setDone(new Set());
+    await refresh();
+  });
+  const decide = (item: ClientSummary["check"][number], how: "add" | "same") => run(item.waveId, async () => {
+    const { error: e } = how === "add"
+      ? await supabase!.from("clients").insert({ name: item.waveName, source: "wave", wave_customer_id: item.waveId })
+      : await supabase!.from("client_wave_skip").insert({ wave_customer_id: item.waveId, wave_name: item.waveName, same_as: item.similar.join(", ") });
+    if (e) throw new Error(e.message);
+    setDone((d) => new Set(d).add(item.waveId));
+  });
+  const decideProposed = (id: string, approve: boolean) => run(id, async () => { await decidePending(id, approve); setProposed((p) => p.filter((x) => x.id !== id)); });
+  const approved = Boolean(state?.approved_at);
+  const check = (summary?.check ?? []).filter((c) => !done.has(c.waveId));
+
+  return (
+    <div className="mn-wave-preview">
+      <b>{L(lang, "Wave customers → client list", "Clients Wave → liste des clients")}</b>
+      <small className="mn-muted">{approved
+        ? L(lang, "Missing Wave customers are added to Client Management every night and with “Sync now”. Nothing is ever renamed, merged or removed.", "Les clients Wave manquants sont ajoutés à Gestion des clients chaque nuit et avec « Synchroniser ». Rien n'est jamais renommé, fusionné ou retiré.")
+        : L(lang, "Preview first: see which Wave customers are missing from your client list. Nothing is added until you approve.", "Aperçu d'abord : voyez quels clients Wave manquent à votre liste. Rien n'est ajouté avant votre accord.")}</small>
+      {error && <p className="mn-banner mn-banner-error" role="alert">{error}</p>}
+      {state?.last_error && <p className="mn-banner mn-banner-warn"><TriangleAlert size={15} aria-hidden="true" /> {state.last_error}</p>}
+      <div className="mn-inline-actions">
+        <button type="button" className={approved ? "mn-ghost" : "mn-primary"} disabled={busy !== null} onClick={() => void post("preview")}>{busy === "preview" ? L(lang, "Checking Wave…", "Vérification de Wave…") : L(lang, "Preview clients (dry run)", "Aperçu des clients (essai à blanc)")}</button>
+      </div>
+      {proposed.length > 0 && (
+        <details className="mn-review-list" open><summary>{L(lang, "Check these: added by a technician", "À vérifier : ajoutés par un technicien")} ({proposed.length})</summary>
+          <ul className="mn-plain-list">{proposed.map((p) => (
+            <li key={p.id} className="mn-review-row">
+              <span className="mn-review-desc"><b>{p.name}</b>{p.by ? ` · ${p.by}` : ""}</span>
+              <span className="mn-inline-actions">
+                <button type="button" className="mn-ghost" disabled={busy !== null} onClick={() => void decideProposed(p.id, true)}>{L(lang, "Add to the list", "Ajouter à la liste")}</button>
+                <button type="button" className="mn-ghost" disabled={busy !== null} onClick={() => void decideProposed(p.id, false)}>{L(lang, "Leave out", "Ne pas ajouter")}</button>
+              </span>
+            </li>
+          ))}</ul>
+        </details>
+      )}
+      {summary && (
+        <>
+          <p className="mn-review-sum">
+            <span><b>{summary.counts.wave - summary.counts.archived}</b> {L(lang, "Wave customers", "clients Wave")}</span>
+            <span><b>{summary.counts.alreadyThere}</b> {L(lang, "already in the list", "déjà dans la liste")}</span>
+            <span><b>{summary.applied ? summary.added : summary.counts.add}</b> {summary.applied ? L(lang, "added", "ajoutés") : L(lang, "would be added", "seraient ajoutés")}</span>
+            <span><b>{check.length}</b> {L(lang, "to check", "à vérifier")}</span>
+          </p>
+          <small className="mn-muted">{summary.applied ? L(lang, "Last sync", "Dernière synchro") : L(lang, "Preview, nothing was saved", "Aperçu, rien n'a été enregistré")} · {new Date(summary.at).toLocaleString(lang === "fr" ? "fr-CA" : "en-CA", { dateStyle: "short", timeStyle: "short" })}</small>
+          {summary.add.length > 0 && (
+            <details className="mn-review-list" open={!approved}><summary>{summary.applied ? L(lang, "Added", "Ajoutés") : L(lang, "Missing names it would add", "Noms manquants à ajouter")} ({summary.add.length})</summary>
+              <ul className="mn-plain-list">{summary.add.map((a) => <li key={a.waveId} className="mn-review-row"><span className="mn-review-desc">{a.name}</span></li>)}</ul>
+            </details>
+          )}
+          {check.length > 0 && (
+            <details className="mn-review-list" open><summary>{L(lang, "Check these (close to a client you already have, not added)", "À vérifier (proche d'un client existant, pas ajouté)")} ({check.length})</summary>
+              <ul className="mn-plain-list">{check.map((c) => (
+                <li key={c.waveId} className="mn-review-row">
+                  <span className="mn-review-desc"><b>{c.waveName}</b> · {L(lang, "you have", "vous avez")} {c.similar.join(", ")}</span>
+                  <span className="mn-inline-actions">
+                    <button type="button" className="mn-ghost" disabled={busy !== null} onClick={() => void decide(c, "same")}>{L(lang, "Same client", "Même client")}</button>
+                    <button type="button" className="mn-ghost" disabled={busy !== null} onClick={() => void decide(c, "add")}>{L(lang, "Add as new", "Ajouter comme nouveau")}</button>
+                  </span>
+                </li>
+              ))}</ul>
+            </details>
+          )}
+          {!approved && (
+            <div className="mn-form-actions mn-inline-actions">
+              <button type="button" className="mn-primary mn-primary-in" disabled={busy !== null} onClick={() => void post("approve")}>{busy === "approve" ? L(lang, "Adding…", "Ajout…") : L(lang, `Looks right: add ${summary.counts.add} and keep adding`, `C'est bon : ajouter ${summary.counts.add} et continuer`)}</button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 }

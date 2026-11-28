@@ -12,7 +12,9 @@ export async function GET(request: Request) {
   const db = serviceClient();
   let result: Record<string, unknown> = { skipped: true };
   const before = await loadConnection(db);
-  if (before?.approved_at) {
+  // Wave Pro expired: don't knock on Wave's door every night; "Connect Wave" again turns syncing back on.
+  if (before?.status === "pro_expired") result = { skipped: true, reason: "wave_pro_expired" };
+  else if (before?.approved_at) {
     try {
       const s = await runWaveSync({ mode: "sync", trigger: "cron", by: "Nightly sync" });
       result = { ok: true, ...s.counts };

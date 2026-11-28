@@ -9,7 +9,14 @@ export const WAVE_TOKEN = "https://api.waveapps.com/oauth2/token/";
 export const DEFAULT_SCOPES = "business:read account:read customer:read invoice:read product:read sales_tax:read vendor:read user:read";
 
 export class WaveError extends Error {
-  constructor(public code: "not_configured" | "auth" | "forbidden" | "rate_limited" | "graphql" | "http", message: string) { super(message); }
+  constructor(public code: "not_configured" | "auth" | "forbidden" | "subscription" | "rate_limited" | "graphql" | "http", message: string) { super(message); }
+}
+
+// Wave's API only works while the business has Wave Pro. When Pro runs out, Wave answers "access_denied",
+// 402, or an error that talks about the plan/subscription: that is not a token problem, and retrying won't help.
+export const PRO_EXPIRED_MESSAGE = "Wave Pro has expired, so Wave stopped sharing data. Renew Wave Pro, then click “Connect Wave” again. Nothing in Money was changed.";
+export function looksLikeProExpired(text: string): boolean {
+  return /access[_ ]denied|payment required|\bsubscription\b|\bwave pro\b|\bpro (plan|subscription)\b|\bupgrade\b|plan (has )?expired/i.test(text);
 }
 
 export function waveConfig() {
@@ -86,7 +93,10 @@ async function tokenRequest(form: Record<string, string>, fetcher: typeof fetch)
     response = await send(true);
     body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
   }
-  if (!response.ok || typeof body.access_token !== "string") throw new WaveError("auth", String(body.error_description ?? body.error ?? body.message ?? `token ${response.status}`));
+  if (!response.ok || typeof body.access_token !== "string") {
+    const why = String(body.error_description ?? body.error ?? body.message ?? `token ${response.status}`);
+    throw new WaveError(response.status === 402 || looksLikeProExpired(`${body.error ?? ""} ${why}`) ? "subscription" : "auth", why);
+  }
   const expiresIn = Number(body.expires_in);
   return {
     accessToken: body.access_token,
@@ -116,13 +126,18 @@ export function graphqlClient(token: string, fetcher: typeof fetch = fetch, stat
         await new Promise((r) => setTimeout(r, Math.min(30, wait) * 1000));
         continue;
       }
-      if (response.status === 401 || response.status === 403) throw new WaveError("auth", `Wave refused the token (${response.status})`);
+      if (response.status === 402) throw new WaveError("subscription", "Wave answered 402 (payment required)");
+      if (response.status === 401 || response.status === 403) {
+        const text = await response.text().catch(() => "");
+        throw new WaveError(looksLikeProExpired(text) ? "subscription" : "auth", `Wave refused the token (${response.status})${text ? `: ${text.slice(0, 200)}` : ""}`);
+      }
       const body = (await response.json().catch(() => ({}))) as { data?: Record<string, unknown>; errors?: Array<{ message?: string; extensions?: { code?: string } }> };
       if (body.errors?.length) {
         // UNAUTHENTICATED = the sign-in expired; FORBIDDEN = this app wasn't given permission for that part (not an expiry).
         const unauth = body.errors.some((e) => /UNAUTHENTICATED/i.test(e.extensions?.code ?? "") || /authentication expired|unauthenticated/i.test(e.message ?? ""));
         const forbidden = body.errors.some((e) => /FORBIDDEN/i.test(e.extensions?.code ?? "") || /not authorized/i.test(e.message ?? ""));
-        throw new WaveError(unauth ? "auth" : forbidden ? "forbidden" : "graphql", body.errors.map((e) => e.message).join("; "));
+        const text = body.errors.map((e) => e.message).join("; ");
+        throw new WaveError(looksLikeProExpired(text) ? "subscription" : unauth ? "auth" : forbidden ? "forbidden" : "graphql", text);
       }
       if (!response.ok || !body.data) throw new WaveError("http", `Wave answered ${response.status}`);
       return body.data;
@@ -147,3 +162,5 @@ export async function allPages(gql: GraphQL, query: string, businessId: string, 
   }
   return out;
 }
+
+export const Q_CUSTOMERS = `query($b: ID!, $page: Int!) { business(id: $b) { customers(page: $page, pageSize: 100) { pageInfo { currentPage totalPages } edges { node { id name isArchived } } } } }`;

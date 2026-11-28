@@ -15,6 +15,8 @@
     "check:lock-dry-run": "node --env-file=.env.local scripts/check-lock-dry-run.mjs",
     "check:money": "node --env-file=.env.local scripts/check-money-access.mjs",
     "check:wave": "node --env-file=.env.local scripts/check-wave-sync.mjs",
+    "check:clients": "node --env-file=.env.local scripts/check-clients.mjs",
+    "clients:preview": "node --env-file=.env.local node_modules/jiti/lib/jiti-cli.mjs scripts/clients-preview.ts",
     "wave:probe": "node --env-file=.env.local node_modules/jiti/lib/jiti-cli.mjs scripts/wave-probe.ts"
   },
   "dependencies": {
